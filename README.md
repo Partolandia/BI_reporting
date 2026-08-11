@@ -12,7 +12,7 @@ and staleness logic are done; no dashboard UI or Slack integration yet.
 - `staleness.py` — the business logic that decides if a ticket is stale.
   See "How staleness is calculated" below.
 - `check_staleness.py` — a script that prints every open ticket classified
-  green/yellow/red.
+  red/yellow/green, plus a separate "Ready to Close" list.
 - `list_projects.py` — a script that lists every Jira project your account
   can see, with its real project key. Useful if you ever need to add or
   double check a project key.
@@ -59,10 +59,10 @@ and staleness logic are done; no dashboard UI or Slack integration yet.
    python check_staleness.py
    ```
    This pulls every *open* ticket (skips ones already Done) for the team,
-   fetches each one's change history, and prints a RED/YELLOW/GREEN table
-   plus a summary count. It's slower than `test_connection.py` — expect
-   roughly 1 second per open ticket, since it fetches each ticket's history
-   individually.
+   fetches each one's change history and comments, and prints tables grouped
+   by RED / YELLOW / READY TO CLOSE / GREEN plus a summary count. It's
+   slower than `test_connection.py` — expect roughly 1-2 seconds per open
+   ticket, since it fetches each ticket's history and comments individually.
 
 ## Why the search endpoint looks the way it does
 
@@ -95,6 +95,24 @@ Staleness is how many days have passed since then:
 So a ticket sitting on "Open" that got a client-approval comment yesterday
 shows green, while a ticket sitting on "In Design" that nobody has touched
 in 4 days shows red — which is exactly the distinction the team needs.
+
+### The "Ready to Close" category
+
+Some tickets aren't neglected — they're just unclosed. If the client replies
+"looks good, thanks!" and nobody formally closes the Jira ticket, the old
+logic would flag it as increasingly red the longer it sits, which isn't
+fair to whoever's assigned. So before a ticket gets labeled red or yellow,
+`staleness.py` checks whether its *latest comment* sounds like a sign-off
+(phrases like "looks good," "all set," "resolved," etc. — see
+`CLOSURE_SIGNAL_PHRASES` at the top of `staleness.py`). If it matches, the
+ticket goes into a separate **Ready to Close** list instead — a
+housekeeping nudge, not an "at risk" alarm.
+
+This is a plain keyword match, not real language understanding, so it will
+miss phrasings that aren't in the list and could occasionally misfire on a
+comment that happens to contain one of those phrases in a different sense.
+Treat it as a starting point — tell me what it gets wrong and I'll tune the
+phrase list.
 
 ## What's next
 
