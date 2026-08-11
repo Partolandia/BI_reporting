@@ -48,6 +48,12 @@ import jira_client
 YELLOW_AFTER_DAYS = 2
 RED_AFTER_DAYS = 3
 
+# Statuses excluded from every view by default -- these mean the work is
+# already done on our end and is just sitting in a separate implementation/
+# scheduling process, so they're noise for staleness purposes. Still
+# reachable by explicitly passing them via check_staleness.py's --status.
+DEFAULT_EXCLUDED_STATUSES = ["Awaiting Implementation", "Scheduling Acceptance"]
+
 # Simple keyword heuristic for "the client/requester sounds satisfied and
 # this ticket is probably just waiting to be formally closed." This is NOT
 # smart -- it's a plain substring match against the latest comment, so it
@@ -240,12 +246,17 @@ def build_report(project_keys=None, statuses=None):
 
     Pass statuses (e.g. ["Open"] or ["Open", "Scoping"]) to check only
     tickets currently sitting in those exact Jira statuses, instead of
-    every non-Done status.
+    every non-Done status. When statuses isn't given, DEFAULT_EXCLUDED_STATUSES
+    are left out automatically; passing statuses explicitly (including one
+    of those excluded ones) overrides that default.
     """
     extra_jql = "statusCategory != Done"
     if statuses:
         quoted_statuses = ", ".join(f'"{status}"' for status in statuses)
         extra_jql += f" AND status in ({quoted_statuses})"
+    elif DEFAULT_EXCLUDED_STATUSES:
+        quoted_excluded = ", ".join(f'"{status}"' for status in DEFAULT_EXCLUDED_STATUSES)
+        extra_jql += f" AND status not in ({quoted_excluded})"
 
     issues = jira_client.get_tickets(project_keys=project_keys, extra_jql=extra_jql)
 

@@ -60,11 +60,13 @@ and staleness logic are done; no dashboard UI or Slack integration yet.
    ```
    python check_staleness.py
    ```
-   This pulls every *open* ticket (skips ones already Done) for the team,
-   fetches each one's change history and comments, and prints tables grouped
-   by RED / YELLOW / READY TO CLOSE / GREEN plus a summary count. It's
-   slower than `test_connection.py` — expect roughly 1-2 seconds per open
-   ticket, since it fetches each ticket's history and comments individually.
+   This pulls every *open* ticket (skips ones already Done, and skips
+   Awaiting Implementation / Scheduling Acceptance by default — see below)
+   for the team, fetches each one's change history and comments, and
+   prints tables grouped by RED / YELLOW / READY TO CLOSE / GREEN plus a
+   summary count. It's slower than `test_connection.py` — expect roughly
+   1-2 seconds per open ticket, since it fetches each ticket's history and
+   comments individually.
 
    To check just one or a few projects instead of all of them, pass their
    keys (comma-separated, no spaces):
@@ -201,6 +203,22 @@ manual cleanup needed once the estimate goes out.
 `check_staleness.py` shows these in a dedicated `### NEEDS ESTIMATE ###`
 section, with Henry's actual comment shown underneath each ticket so you
 can confirm it's a real request.
+
+### Statuses excluded by default
+
+`Awaiting Implementation` and `Scheduling Acceptance` are left out of every
+view (URGENT, red/yellow/green, Ready to Close, Needs Estimate, all of it)
+by default — those mean the work already left our hands and is just
+sitting in a separate implementation/scheduling process, so they're noise
+for a staleness check. This list is `DEFAULT_EXCLUDED_STATUSES` at the top
+of `staleness.py`; add more status names there if others should be
+excluded the same way.
+
+If you ever want to see one of these excluded statuses specifically,
+`--status` overrides the exclusion:
+```
+python check_staleness.py --status "Awaiting Implementation"
+```
 
 ## What's next
 
