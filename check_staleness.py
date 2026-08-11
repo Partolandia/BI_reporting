@@ -72,6 +72,7 @@ def resolve_statuses(raw):
 
 def print_row(row, category):
     flag = " [STATUS NEEDS UPDATING]" if row["needs_status_update"] else ""
+    flag += " [NEEDS ESTIMATE]" if row["needs_estimate"] else ""
     print(
         f"{row['key']:<10} {row['days_inactive']:<6} {row['status']:<20} "
         f"{row['responsible_party']:<12} {row['assignee']:<22} {row['summary'][:35]}{flag}"
@@ -81,6 +82,9 @@ def print_row(row, category):
     if row["needs_status_update"]:
         print(f"           -> {row['progress_comment_author']} commented "
               f"({row['progress_comment_date']}): {row['progress_comment'][:90]}")
+    if row["needs_estimate"]:
+        print(f"           -> {row['estimate_request_by']} asked "
+              f"({row['estimate_request_date']}): {row['estimate_request_text'][:90]}")
 
 
 def main():
@@ -99,12 +103,15 @@ def main():
     counts = {c: 0 for c in CATEGORY_ORDER}
     needs_status_update_count = 0
     urgent_rows = []
+    needs_estimate_rows = []
     for row in report:
         counts[row["category"]] += 1
         if row["needs_status_update"]:
             needs_status_update_count += 1
         if row["urgent"]:
             urgent_rows.append(row)
+        if row["needs_estimate"]:
+            needs_estimate_rows.append(row)
 
     print(f"{len(report)} tickets checked.")
     print(f"  URGENT (red, action is on us):       {len(urgent_rows)}")
@@ -112,7 +119,8 @@ def main():
     print(f"  YELLOW (2-3 days, no real activity):  {counts['yellow']}")
     print(f"  READY TO CLOSE (sign-off, unclosed):  {counts['ready_to_close']}")
     print(f"  GREEN (active):                       {counts['green']}")
-    print(f"  STATUS NEEDS UPDATING (stuck Open):   {needs_status_update_count}\n")
+    print(f"  STATUS NEEDS UPDATING (stuck Open):   {needs_status_update_count}")
+    print(f"  NEEDS ESTIMATE (unanswered request):  {len(needs_estimate_rows)}\n")
 
     if urgent_rows:
         print(f"\n### URGENT -- needs attention now ({len(urgent_rows)}) ###")
@@ -120,6 +128,13 @@ def main():
         print("=" * 110)
         for row in urgent_rows:
             print_row(row, "urgent")
+
+    if needs_estimate_rows:
+        print(f"\n### NEEDS ESTIMATE ({len(needs_estimate_rows)}) ###")
+        print(f"{'Key':<10} {'Days':<6} {'Status':<20} {'Resp.':<12} {'Assignee':<22} Summary")
+        print("=" * 110)
+        for row in needs_estimate_rows:
+            print_row(row, "needs_estimate")
 
     for category in CATEGORY_ORDER:
         rows = [r for r in report if r["category"] == category]

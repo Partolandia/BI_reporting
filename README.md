@@ -11,9 +11,10 @@ and staleness logic are done; no dashboard UI or Slack integration yet.
 - `test_connection.py` — a script you run to prove the connection works.
 - `staleness.py` — the business logic that decides if a ticket is stale.
   See "How staleness is calculated" below.
-- `check_staleness.py` — a script that prints an URGENT section, then every
-  ticket classified red/yellow/green (plus "Ready to Close" and "Status
-  Needs Updating"), each with who's responsible for the next action.
+- `check_staleness.py` — a script that prints URGENT and Needs Estimate
+  sections, then every ticket classified red/yellow/green (plus "Ready to
+  Close" and "Status Needs Updating"), each with who's responsible for the
+  next action.
 - `list_projects.py` — a script that lists every Jira project your account
   can see, with its real project key. Useful if you ever need to add or
   double check a project key.
@@ -181,6 +182,25 @@ and it's been sitting too long. A red ticket where the client owes the
 reply doesn't count as urgent, since that's not the team dropping the
 ball. `check_staleness.py` prints an `### URGENT ###` section at the top,
 before the regular red/yellow/green breakdown.
+
+### The "Needs Estimate" section
+
+Estimate requests commonly come in as a comment from **Henry Glubb**
+asking a team member (usually Isaac) to assign the ticket for an estimate
+— mostly on CSSD tickets, but it can happen on IAP or ACP too, so this
+isn't restricted to one project.
+
+The rule: if a ticket's **most recent comment** is from someone in
+`ESTIMATE_REQUESTERS` (just Henry Glubb for now — add more names at the
+top of `staleness.py` if others start doing this) and that comment
+mentions "estimat..." (matches estimate/estimation/estimating), the
+ticket is flagged `[NEEDS ESTIMATE]`. Checking only the *latest* comment
+means it clears itself automatically the moment someone replies — no
+manual cleanup needed once the estimate goes out.
+
+`check_staleness.py` shows these in a dedicated `### NEEDS ESTIMATE ###`
+section, with Henry's actual comment shown underneath each ticket so you
+can confirm it's a real request.
 
 ## What's next
 

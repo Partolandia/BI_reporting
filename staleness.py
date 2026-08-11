@@ -33,6 +33,12 @@ Internal -- whoever needs to take the next action, based on its status
 next action is on us (Team member or Internal) rather than the client --
 being red because we're waiting on the client isn't the team dropping the
 ball.
+
+And a "needs_estimate" flag: the ticket's most recent comment is from one
+of ESTIMATE_REQUESTERS (commonly Henry Glubb) and mentions an estimate --
+i.e. someone asked for one and nobody's replied yet. Checking only the
+latest comment means this clears itself automatically once a team member
+responds, same pattern as ready_to_close.
 """
 
 from datetime import datetime, timezone
@@ -92,6 +98,11 @@ def responsible_party(status_name, assignee_name):
     if assignee_name is None:
         return "Internal"
     return STATUS_RESPONSIBLE_PARTY.get(status_name.lower(), "Team member")
+
+
+# People whose comments count as an estimate request. Add more names here
+# if others start requesting estimates the same way.
+ESTIMATE_REQUESTERS = ["Henry Glubb"]
 
 
 def parse_jira_datetime(value):
@@ -156,6 +167,25 @@ def find_team_comment(comments, team_members):
         if author.lower() in team_members_lower:
             return comment
     return None
+
+
+def find_estimate_request(comments, requesters):
+    """
+    If the ticket's most recent comment is from one of `requesters` and
+    mentions an estimate, returns that comment. Otherwise returns None --
+    including when someone else has replied more recently, since that
+    means the request has already been addressed.
+    """
+    if not comments:
+        return None
+    latest = max(comments, key=lambda c: parse_jira_datetime(c["created"]))
+    author = latest.get("author", {}).get("displayName", "")
+    if author not in requesters:
+        return None
+    text = adf_to_text(latest.get("body"))
+    if "estimat" not in text.lower():  # covers estimate/estimation/estimating
+        return None
+    return latest
 
 
 def real_last_activity(issue, histories, comments):
@@ -247,6 +277,12 @@ def build_report(project_keys=None, statuses=None):
         party = responsible_party(status_name, assignee_name)
         urgent = category == "red" and party != "Client"
 
+        estimate_request = find_estimate_request(comments, ESTIMATE_REQUESTERS)
+        needs_estimate = estimate_request is not None
+        estimate_request_text = adf_to_text(estimate_request.get("body")) if estimate_request else None
+        estimate_request_by = estimate_request["author"]["displayName"] if estimate_request else None
+        estimate_request_date = estimate_request["created"] if estimate_request else None
+
         report.append(
             {
                 "key": issue["key"],
@@ -264,6 +300,10 @@ def build_report(project_keys=None, statuses=None):
                 "progress_comment_date": progress_comment_date,
                 "responsible_party": party,
                 "urgent": urgent,
+                "needs_estimate": needs_estimate,
+                "estimate_request_text": estimate_request_text,
+                "estimate_request_by": estimate_request_by,
+                "estimate_request_date": estimate_request_date,
             }
         )
 
