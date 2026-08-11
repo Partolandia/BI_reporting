@@ -33,7 +33,10 @@ or Slack integration yet.
    cp .env.example .env
    ```
    Then open `.env` in any text editor and paste in your real API token.
-   Leave everything else as-is unless your site URL or project keys differ.
+   Leave everything else as-is unless your site URL, project keys, or team
+   member list differ. `JIRA_TEAM_MEMBERS` controls whose tickets get
+   pulled — it must match each person's exact Jira display name. Leave it
+   blank to pull tickets for every assignee instead of a specific team.
 
 4. **Run the connection test**:
    ```

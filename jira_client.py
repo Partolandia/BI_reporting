@@ -22,6 +22,12 @@ EMAIL = os.environ["JIRA_EMAIL"]
 API_TOKEN = os.environ["JIRA_API_TOKEN"]
 PROJECT_KEYS = [key.strip() for key in os.environ["JIRA_PROJECT_KEYS"].split(",")]
 
+# Only track these team members' tickets. Set JIRA_TEAM_MEMBERS in .env to
+# their Jira display names exactly as they appear in Jira (comma-separated).
+# Leave it blank/unset in .env to pull tickets for every assignee instead.
+_team_members_raw = os.environ.get("JIRA_TEAM_MEMBERS", "")
+TEAM_MEMBERS = [name.strip() for name in _team_members_raw.split(",") if name.strip()]
+
 SEARCH_URL = f"{SITE_URL}/rest/api/3/search/jql"
 
 # Fields we need for the dashboard: identity, ownership, and everything the
@@ -52,6 +58,11 @@ def get_tickets(project_keys=None, extra_jql=None, page_size=100):
     project_keys = project_keys or PROJECT_KEYS
     project_list = ", ".join(project_keys)
     jql = f"project in ({project_list})"
+
+    if TEAM_MEMBERS:
+        quoted_names = ", ".join(f'"{name}"' for name in TEAM_MEMBERS)
+        jql += f" AND assignee in ({quoted_names})"
+
     if extra_jql:
         jql += f" AND {extra_jql}"
     jql += " ORDER BY updated DESC"
