@@ -31,8 +31,10 @@ TEAM_MEMBERS = [name.strip() for name in _team_members_raw.split(",") if name.st
 SEARCH_URL = f"{SITE_URL}/rest/api/3/search/jql"
 
 # Fields we need for the dashboard: identity, ownership, and everything the
-# staleness logic will eventually need to judge real activity vs. a stale
-# "Open" status label.
+# staleness logic needs to judge real activity vs. a stale "Open" status
+# label. Comments are NOT fetched here -- the search endpoint's embedded
+# "comment" field doesn't reliably return full comment data, so we pull
+# comments separately per ticket via get_comments() instead.
 FIELDS = [
     "summary",
     "status",
@@ -42,7 +44,6 @@ FIELDS = [
     "priority",
     "created",
     "updated",
-    "comment",
 ]
 
 
@@ -121,6 +122,36 @@ def get_changelog(issue_key):
         start_at += len(data["values"])
 
     return histories
+
+
+def get_comments(issue_key):
+    """
+    Pull every comment on one ticket via GET /rest/api/3/issue/{key}/comment
+    -- the dedicated, stable comments endpoint (as opposed to the "comment"
+    field on search results, which doesn't reliably return full comment
+    data on the current search API).
+    """
+    url = f"{SITE_URL}/rest/api/3/issue/{issue_key}/comment"
+    comments = []
+    start_at = 0
+
+    while True:
+        response = requests.get(
+            url,
+            auth=_auth(),
+            params={"startAt": start_at, "maxResults": 100},
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        comments.extend(data["comments"])
+
+        start_at += len(data["comments"])
+        if start_at >= data["total"]:
+            break
+
+    return comments
 
 
 def summarize(issue):

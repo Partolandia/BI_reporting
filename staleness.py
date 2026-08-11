@@ -10,7 +10,13 @@ change, a comment, or (for a brand new ticket) its creation.
 Thresholds:
   green  = less than 2 days since real last activity
   yellow = 2 to 3 days
-  red    = 3+ days (this is the "stale" flag)
+  red    = 3+ days (this is the "stale" / needs-attention flag)
+
+There's also a separate "ready_to_close" category: tickets where the most
+recent comment sounds like the client/requester signing off (e.g. "looks
+good", "thanks, that works"). Those get pulled OUT of red/yellow -- work
+sitting untouched after a sign-off isn't the team dropping the ball, it's
+just an unclosed ticket, so it shouldn't read as urgent.
 """
 
 from datetime import datetime, timezone
@@ -20,10 +26,53 @@ import jira_client
 YELLOW_AFTER_DAYS = 2
 RED_AFTER_DAYS = 3
 
+# Simple keyword heuristic for "the client/requester sounds satisfied and
+# this ticket is probably just waiting to be formally closed." This is NOT
+# smart -- it's a plain substring match against the latest comment, so it
+# will miss phrasings we haven't listed and can occasionally misfire on a
+# comment that happens to contain one of these phrases in a different
+# context. Treat "Ready to Close" as a worth-a-look list, not gospel, and
+# add/remove phrases here as you see false positives or misses.
+CLOSURE_SIGNAL_PHRASES = [
+    "looks good",
+    "look good",
+    "all good",
+    "sounds good",
+    "that works",
+    "this works",
+    "works great",
+    "perfect, thank",
+    "thanks, this works",
+    "resolved",
+    "all set",
+    "no further",
+    "please close",
+    "closing this",
+    "confirmed working",
+    "everything is good",
+    "everything looks good",
+    "that's all we needed",
+    "this is exactly what we needed",
+]
+
 
 def parse_jira_datetime(value):
     """Jira timestamps look like '2026-08-11T13:52:10.254-0400'."""
     return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%f%z")
+
+
+def adf_to_text(node):
+    """
+    Comment bodies come back as Atlassian Document Format (a nested JSON
+    structure), not plain text. This walks it and pulls out just the text.
+    """
+    if isinstance(node, dict):
+        parts = [node.get("text", "")]
+        parts.extend(adf_to_text(child) for child in node.get("content", []))
+        return " ".join(p for p in parts if p)
+    if isinstance(node, list):
+        return " ".join(adf_to_text(item) for item in node)
+    return ""
 
 
 def last_status_change(histories):
@@ -37,15 +86,27 @@ def last_status_change(histories):
     return latest
 
 
-def last_comment(fields):
+def last_comment_time(comments):
     """Latest comment timestamp on the ticket, or None if there are none."""
-    comments = fields.get("comment", {}).get("comments", [])
     if not comments:
         return None
     return max(parse_jira_datetime(c["created"]) for c in comments)
 
 
-def real_last_activity(issue, histories):
+def latest_comment_text(comments):
+    """Plain text of the single most recent comment, or "" if there are none."""
+    if not comments:
+        return ""
+    latest = max(comments, key=lambda c: parse_jira_datetime(c["created"]))
+    return adf_to_text(latest.get("body"))
+
+
+def looks_like_closure_signal(comment_text):
+    lowered = comment_text.lower()
+    return any(phrase in lowered for phrase in CLOSURE_SIGNAL_PHRASES)
+
+
+def real_last_activity(issue, histories, comments):
     """
     The most recent point of real activity on a ticket: whichever is most
     recent out of its creation date, its last actual status change, and its
@@ -58,9 +119,9 @@ def real_last_activity(issue, histories):
     if status_change:
         candidates.append(status_change)
 
-    comment = last_comment(fields)
-    if comment:
-        candidates.append(comment)
+    comment_time = last_comment_time(comments)
+    if comment_time:
+        candidates.append(comment_time)
 
     return max(candidates)
 
@@ -80,16 +141,26 @@ def staleness_level(last_activity, now=None):
 def build_report():
     """
     Pulls every open (not-Done) ticket for the tracked team/projects, works
-    out each one's real last-activity date, and classifies it green/yellow/red.
-    Returns a list of dicts, worst (most stale) first.
+    out each one's real last-activity date, and classifies it. Returns a
+    list of dicts, worst (most stale) first.
+
+    "category" is what should drive the dashboard/digest display:
+    red / yellow / green for normal staleness, or ready_to_close when the
+    latest comment sounds like a sign-off (see CLOSURE_SIGNAL_PHRASES).
     """
     issues = jira_client.get_tickets(extra_jql="statusCategory != Done")
 
     report = []
     for issue in issues:
         histories = jira_client.get_changelog(issue["key"])
-        last_activity = real_last_activity(issue, histories)
+        comments = jira_client.get_comments(issue["key"])
+
+        last_activity = real_last_activity(issue, histories, comments)
         level, days = staleness_level(last_activity)
+
+        comment_text = latest_comment_text(comments)
+        ready_to_close = looks_like_closure_signal(comment_text)
+        category = "ready_to_close" if ready_to_close else level
 
         fields = issue["fields"]
         assignee = fields.get("assignee")
@@ -102,9 +173,11 @@ def build_report():
                 "last_real_activity": last_activity,
                 "days_inactive": round(days, 1),
                 "level": level,
+                "category": category,
+                "latest_comment": comment_text,
             }
         )
 
-    level_order = {"red": 0, "yellow": 1, "green": 2}
-    report.sort(key=lambda r: (level_order[r["level"]], -r["days_inactive"]))
+    category_order = {"red": 0, "yellow": 1, "ready_to_close": 2, "green": 3}
+    report.sort(key=lambda r: (category_order[r["category"]], -r["days_inactive"]))
     return report
