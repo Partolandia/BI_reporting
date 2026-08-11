@@ -11,9 +11,9 @@ and staleness logic are done; no dashboard UI or Slack integration yet.
 - `test_connection.py` — a script you run to prove the connection works.
 - `staleness.py` — the business logic that decides if a ticket is stale.
   See "How staleness is calculated" below.
-- `check_staleness.py` — a script that prints every open ticket classified
-  red/yellow/green, plus separate "Ready to Close" and "Status Needs
-  Updating" lists.
+- `check_staleness.py` — a script that prints an URGENT section, then every
+  ticket classified red/yellow/green (plus "Ready to Close" and "Status
+  Needs Updating"), each with who's responsible for the next action.
 - `list_projects.py` — a script that lists every Jira project your account
   can see, with its real project key. Useful if you ever need to add or
   double check a project key.
@@ -156,6 +156,31 @@ from someone on the actual team does.
 
 This flag is independent of red/yellow/green/Ready to Close — a ticket can
 be both, e.g. red *and* needing its status moved off Open.
+
+### Responsible party and the URGENT section
+
+Every ticket now gets a **responsible_party**: `Client`, `Team member`, or
+`Internal` — whoever needs to take the next action. This is based on the
+ticket's status, since your team already names statuses meaningfully:
+
+- `Pending Client`, `Client Review`, `Waiting for Approval`, `Pending` →
+  **Client** (they owe a response)
+- `Scheduling Acceptance` → **Internal**
+- Unassigned tickets → **Internal** (needs to be triaged/assigned)
+- Everything else (Scoping, In Progress, Awaiting Implementation, Open,
+  etc.) → **Team member** (the assignee needs to act)
+
+This mapping lives in `STATUS_RESPONSIBLE_PARTY` at the top of
+`staleness.py` and is a best guess based on the status names seen so far —
+if you spot one classified wrong (or a status not in the list at all,
+which defaults to Team member), tell me and I'll fix the mapping.
+
+A ticket is **URGENT** when it's red (3+ days, no real activity) *and* the
+responsible party is Team member or Internal — i.e. it's genuinely on us,
+and it's been sitting too long. A red ticket where the client owes the
+reply doesn't count as urgent, since that's not the team dropping the
+ball. `check_staleness.py` prints an `### URGENT ###` section at the top,
+before the regular red/yellow/green breakdown.
 
 ## What's next
 

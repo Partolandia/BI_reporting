@@ -26,6 +26,13 @@ say -- that's real work happening, so the status field is now wrong and
 someone should move it to whatever it should actually say (Scoping,
 Pending Client, In Development...). This isn't about urgency, it's a
 data-hygiene nudge.
+
+Every ticket also gets a "responsible_party": Client, Team member, or
+Internal -- whoever needs to take the next action, based on its status
+(see STATUS_RESPONSIBLE_PARTY). A ticket is "urgent" when it's red AND the
+next action is on us (Team member or Internal) rather than the client --
+being red because we're waiting on the client isn't the team dropping the
+ball.
 """
 
 from datetime import datetime, timezone
@@ -64,6 +71,27 @@ CLOSURE_SIGNAL_PHRASES = [
     "this is exactly what we needed",
 ]
 
+# Maps a Jira status name (lowercased) to who needs to act next: "Client"
+# (the client/requester owes a response), "Team member" (the assignee
+# needs to act), or "Internal" (needs attention from someone other than
+# the assignee, e.g. an unowned ticket needing triage). Anything not
+# listed here defaults to "Team member" in responsible_party() below.
+# These are guesses based on the status names seen so far -- correct this
+# mapping as you spot statuses classified wrong.
+STATUS_RESPONSIBLE_PARTY = {
+    "pending client": "Client",
+    "client review": "Client",
+    "waiting for approval": "Client",
+    "pending": "Client",
+    "scheduling acceptance": "Internal",
+}
+
+
+def responsible_party(status_name, assignee_name):
+    """Who needs to take the next action: 'Client', 'Team member', or 'Internal'."""
+    if assignee_name is None:
+        return "Internal"
+    return STATUS_RESPONSIBLE_PARTY.get(status_name.lower(), "Team member")
 
 
 def parse_jira_datetime(value):
@@ -215,12 +243,16 @@ def build_report(project_keys=None, statuses=None):
         progress_comment_date = team_comment["created"] if team_comment else None
 
         assignee = fields.get("assignee")
+        assignee_name = assignee["displayName"] if assignee else None
+        party = responsible_party(status_name, assignee_name)
+        urgent = category == "red" and party != "Client"
+
         report.append(
             {
                 "key": issue["key"],
                 "summary": fields["summary"],
                 "status": status_name,
-                "assignee": assignee["displayName"] if assignee else "Unassigned",
+                "assignee": assignee_name or "Unassigned",
                 "last_real_activity": last_activity,
                 "days_inactive": round(days, 1),
                 "level": level,
@@ -230,6 +262,8 @@ def build_report(project_keys=None, statuses=None):
                 "progress_comment": progress_comment,
                 "progress_comment_author": progress_comment_author,
                 "progress_comment_date": progress_comment_date,
+                "responsible_party": party,
+                "urgent": urgent,
             }
         )
 
