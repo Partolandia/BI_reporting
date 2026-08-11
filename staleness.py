@@ -19,11 +19,13 @@ sitting untouched after a sign-off isn't the team dropping the ball, it's
 just an unclosed ticket, so it shouldn't read as urgent.
 
 And a separate "needs_status_update" flag: tickets still sitting on the
-generic "Open" status where a comment shows real progress already happened
-(an estimate went out, a scope was delivered, etc.). This isn't about
-urgency -- it's a data-hygiene nudge that the status field itself is wrong
-and someone should move it to whatever it should actually say (Scoping,
-Pending Client, In Development...).
+generic "Open" status where a team member has actually commented. The rule
+is deliberately simple: a ticket is only legitimately "Open" if none of us
+has touched it yet. The moment anyone on the team comments -- whatever they
+say -- that's real work happening, so the status field is now wrong and
+someone should move it to whatever it should actually say (Scoping,
+Pending Client, In Development...). This isn't about urgency, it's a
+data-hygiene nudge.
 """
 
 from datetime import datetime, timezone
@@ -62,37 +64,6 @@ CLOSURE_SIGNAL_PHRASES = [
     "this is exactly what we needed",
 ]
 
-# Simple keyword heuristic for "real progress happened on this ticket, even
-# though its status field still says Open." Matched against EVERY comment
-# (not just the latest), since the progress signal might be a few comments
-# back with quieter discussion after it. Same caveat as above: plain
-# substring matching, not real understanding -- tune this list as you see
-# false positives or misses.
-PROGRESS_SIGNAL_PHRASES = [
-    "sent the estimate",
-    "sent an estimate",
-    "sent estimate",
-    "estimate sent",
-    "estimation sent",
-    "sent for estimation",
-    "sent the scope",
-    "scope sent",
-    "sent scope",
-    "delivered the scope",
-    "scope delivered",
-    "delivered scope",
-    "sent for approval",
-    "sent for client approval",
-    "awaiting client approval",
-    "client approved",
-    "approved by client",
-    "started development",
-    "development started",
-    "started design",
-    "design started",
-    "moved to development",
-    "moved to design",
-]
 
 
 def parse_jira_datetime(value):
@@ -145,18 +116,18 @@ def looks_like_closure_signal(comment_text):
     return any(phrase in lowered for phrase in CLOSURE_SIGNAL_PHRASES)
 
 
-def find_progress_signal_comment(comments):
+def find_team_comment(comments, team_members):
     """
-    Returns (comment_text, created_str) for the first comment (in Jira's
-    returned order, oldest first) that matches PROGRESS_SIGNAL_PHRASES, or
-    (None, None) if none do.
+    Returns the first comment (in Jira's returned order, oldest first)
+    authored by one of team_members (matched case-insensitively against
+    Jira display names), or None if no team member has commented.
     """
+    team_members_lower = {name.lower() for name in team_members}
     for comment in comments:
-        text = adf_to_text(comment.get("body"))
-        lowered = text.lower()
-        if any(phrase in lowered for phrase in PROGRESS_SIGNAL_PHRASES):
-            return text, comment["created"]
-    return None, None
+        author = comment.get("author", {}).get("displayName", "")
+        if author.lower() in team_members_lower:
+            return comment
+    return None
 
 
 def real_last_activity(issue, histories, comments):
@@ -202,9 +173,9 @@ def build_report(project_keys=None, statuses=None):
     latest comment sounds like a sign-off (see CLOSURE_SIGNAL_PHRASES).
 
     "needs_status_update" is a separate True/False flag: the ticket's
-    status is literally "Open" but a comment shows real progress already
-    happened (see PROGRESS_SIGNAL_PHRASES). A ticket can be both, e.g. red
-    AND needing a status update.
+    status is literally "Open" but a team member (per JIRA_TEAM_MEMBERS)
+    has commented on it. A ticket can be both, e.g. red AND needing a
+    status update.
 
     Pass project_keys (e.g. ["CSSD"] or ["CSSD", "IAP"]) to check only
     specific projects instead of every project in JIRA_PROJECT_KEYS.
@@ -235,10 +206,13 @@ def build_report(project_keys=None, statuses=None):
         fields = issue["fields"]
         status_name = fields["status"]["name"]
 
-        progress_comment, progress_comment_date = (None, None)
+        team_comment = None
         if status_name == "Open":
-            progress_comment, progress_comment_date = find_progress_signal_comment(comments)
-        needs_status_update = progress_comment is not None
+            team_comment = find_team_comment(comments, jira_client.TEAM_MEMBERS)
+        needs_status_update = team_comment is not None
+        progress_comment = adf_to_text(team_comment.get("body")) if team_comment else None
+        progress_comment_author = team_comment["author"]["displayName"] if team_comment else None
+        progress_comment_date = team_comment["created"] if team_comment else None
 
         assignee = fields.get("assignee")
         report.append(
@@ -254,6 +228,7 @@ def build_report(project_keys=None, statuses=None):
                 "latest_comment": comment_text,
                 "needs_status_update": needs_status_update,
                 "progress_comment": progress_comment,
+                "progress_comment_author": progress_comment_author,
                 "progress_comment_date": progress_comment_date,
             }
         )

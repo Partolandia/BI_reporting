@@ -137,18 +137,25 @@ status even though real progress happened — an estimate went out, a scope
 got delivered, development started. The status field itself is stale, even
 if the ticket isn't.
 
-For any ticket currently marked **Open**, `staleness.py` scans every
-comment (not just the latest, since the moment progress happened might be
-a few comments back) for phrases like "sent the estimate," "scope
-delivered," "started development," etc. — see `PROGRESS_SIGNAL_PHRASES` in
-`staleness.py`. If any comment matches, the ticket gets flagged
-`[STATUS NEEDS UPDATING]` in `check_staleness.py`'s output, with the
-matching comment shown so you can confirm it's right.
+The rule is deliberately simple, and not based on keywords: a ticket is
+only legitimately "Open" if **none of the 7 team members** (from
+`JIRA_TEAM_MEMBERS` in `.env`) has commented on it yet. The moment anyone
+on the team posts a comment — whatever it says — that's real work
+happening, so the status field is now wrong regardless of the comment's
+wording. (An earlier version tried to match specific phrases like "sent
+the estimate," but that missed real cases where someone described progress
+in different words — checking *who* commented instead of *what they said*
+is both simpler and more reliable.)
+
+For any ticket currently marked **Open**, `staleness.py` checks its
+comments for one authored by a team member. If it finds one, the ticket
+gets flagged `[STATUS NEEDS UPDATING]` in `check_staleness.py`'s output,
+showing who commented, when, and what they said, so you can confirm it.
+Comments from the client/requester alone don't trigger it — only a comment
+from someone on the actual team does.
 
 This flag is independent of red/yellow/green/Ready to Close — a ticket can
-be both, e.g. red *and* needing its status moved off Open. Same caveat as
-above: it's a keyword list, so tell me what it misses or misfires on and
-I'll adjust it.
+be both, e.g. red *and* needing its status moved off Open.
 
 ## What's next
 

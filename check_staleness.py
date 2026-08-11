@@ -113,8 +113,8 @@ def main():
             if category == "ready_to_close" and row["latest_comment"]:
                 print(f"           -> last comment: {row['latest_comment'][:90]}")
             if row["needs_status_update"]:
-                print(f"           -> progress comment ({row['progress_comment_date']}): "
-                      f"{row['progress_comment'][:90]}")
+                print(f"           -> {row['progress_comment_author']} commented "
+                      f"({row['progress_comment_date']}): {row['progress_comment'][:90]}")
 
 
 if __name__ == "__main__":
