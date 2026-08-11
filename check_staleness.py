@@ -1,21 +1,25 @@
 """
 Run this to see the "At Risk" view: every open ticket for the team,
 classified red/yellow/green by real activity, plus a separate "Ready to
-Close" list for tickets where the latest comment sounds like a sign-off.
+Close" list and a "Status Needs Updating" list.
 
     python check_staleness.py
     python check_staleness.py CSSD
     python check_staleness.py CSSD,IAP
+    python check_staleness.py --status Open
+    python check_staleness.py CSSD --status Open,Scoping
 
-With no argument, checks every project in JIRA_PROJECT_KEYS. Pass one or
-more project keys (comma-separated, no spaces) to check just those.
+With no arguments, checks every non-Done status across every project in
+JIRA_PROJECT_KEYS. The first argument (optional) filters by project key,
+comma-separated. --status filters by exact Jira status name(s),
+comma-separated.
 
-This takes longer than test_connection.py -- it fetches each open ticket's
-full change history AND comments one at a time, so expect roughly 1-2
-seconds per ticket.
+This takes longer than test_connection.py -- it fetches each ticket's full
+change history AND comments one at a time, so expect roughly 1-2 seconds
+per ticket.
 """
 
-import sys
+import argparse
 
 import jira_client
 from staleness import build_report
@@ -29,11 +33,26 @@ CATEGORY_LABELS = {
 CATEGORY_ORDER = ["red", "yellow", "ready_to_close", "green"]
 
 
-def parse_project_keys(argv):
-    if len(argv) < 2:
-        return None
+def parse_args():
+    parser = argparse.ArgumentParser(description="Check ticket staleness.")
+    parser.add_argument(
+        "projects",
+        nargs="?",
+        default=None,
+        help="Comma-separated project keys, e.g. CSSD or CSSD,IAP (default: all)",
+    )
+    parser.add_argument(
+        "--status",
+        default=None,
+        help="Comma-separated Jira status names, e.g. Open or Open,Scoping (default: all non-Done)",
+    )
+    return parser.parse_args()
 
-    requested = [key.strip().upper() for key in argv[1].split(",") if key.strip()]
+
+def resolve_project_keys(raw):
+    if not raw:
+        return None
+    requested = [key.strip().upper() for key in raw.split(",") if key.strip()]
     unknown = [key for key in requested if key not in jira_client.PROJECT_KEYS]
     if unknown:
         print(
@@ -44,22 +63,38 @@ def parse_project_keys(argv):
     return requested
 
 
+def resolve_statuses(raw):
+    if not raw:
+        return None
+    return [status.strip() for status in raw.split(",") if status.strip()]
+
+
 def main():
-    project_keys = parse_project_keys(sys.argv)
-    scope = ", ".join(project_keys) if project_keys else ", ".join(jira_client.PROJECT_KEYS)
-    print(f"Checking projects: {scope}")
-    print("Pulling open tickets, change history, and comments -- this may take a few minutes...\n")
-    report = build_report(project_keys=project_keys)
+    args = parse_args()
+    project_keys = resolve_project_keys(args.projects)
+    statuses = resolve_statuses(args.status)
+
+    project_scope = ", ".join(project_keys) if project_keys else ", ".join(jira_client.PROJECT_KEYS)
+    status_scope = ", ".join(statuses) if statuses else "all non-Done statuses"
+    print(f"Checking projects: {project_scope}")
+    print(f"Checking statuses: {status_scope}")
+    print("Pulling tickets, change history, and comments -- this may take a few minutes...\n")
+
+    report = build_report(project_keys=project_keys, statuses=statuses)
 
     counts = {c: 0 for c in CATEGORY_ORDER}
+    needs_status_update_count = 0
     for row in report:
         counts[row["category"]] += 1
+        if row["needs_status_update"]:
+            needs_status_update_count += 1
 
-    print(f"{len(report)} open tickets checked.")
+    print(f"{len(report)} tickets checked.")
     print(f"  RED (3+ days, no real activity):    {counts['red']}")
     print(f"  YELLOW (2-3 days, no real activity): {counts['yellow']}")
     print(f"  READY TO CLOSE (sign-off, unclosed): {counts['ready_to_close']}")
-    print(f"  GREEN (active):                      {counts['green']}\n")
+    print(f"  GREEN (active):                      {counts['green']}")
+    print(f"  STATUS NEEDS UPDATING (stuck Open):  {needs_status_update_count}\n")
 
     for category in CATEGORY_ORDER:
         rows = [r for r in report if r["category"] == category]
@@ -70,12 +105,16 @@ def main():
         print(f"{'Key':<10} {'Days':<6} {'Status':<20} {'Assignee':<22} Summary")
         print("-" * 100)
         for row in rows:
+            flag = " [STATUS NEEDS UPDATING]" if row["needs_status_update"] else ""
             print(
                 f"{row['key']:<10} {row['days_inactive']:<6} {row['status']:<20} "
-                f"{row['assignee']:<22} {row['summary'][:40]}"
+                f"{row['assignee']:<22} {row['summary'][:40]}{flag}"
             )
             if category == "ready_to_close" and row["latest_comment"]:
                 print(f"           -> last comment: {row['latest_comment'][:90]}")
+            if row["needs_status_update"]:
+                print(f"           -> progress comment ({row['progress_comment_date']}): "
+                      f"{row['progress_comment'][:90]}")
 
 
 if __name__ == "__main__":

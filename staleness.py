@@ -17,6 +17,13 @@ recent comment sounds like the client/requester signing off (e.g. "looks
 good", "thanks, that works"). Those get pulled OUT of red/yellow -- work
 sitting untouched after a sign-off isn't the team dropping the ball, it's
 just an unclosed ticket, so it shouldn't read as urgent.
+
+And a separate "needs_status_update" flag: tickets still sitting on the
+generic "Open" status where a comment shows real progress already happened
+(an estimate went out, a scope was delivered, etc.). This isn't about
+urgency -- it's a data-hygiene nudge that the status field itself is wrong
+and someone should move it to whatever it should actually say (Scoping,
+Pending Client, In Development...).
 """
 
 from datetime import datetime, timezone
@@ -53,6 +60,38 @@ CLOSURE_SIGNAL_PHRASES = [
     "everything looks good",
     "that's all we needed",
     "this is exactly what we needed",
+]
+
+# Simple keyword heuristic for "real progress happened on this ticket, even
+# though its status field still says Open." Matched against EVERY comment
+# (not just the latest), since the progress signal might be a few comments
+# back with quieter discussion after it. Same caveat as above: plain
+# substring matching, not real understanding -- tune this list as you see
+# false positives or misses.
+PROGRESS_SIGNAL_PHRASES = [
+    "sent the estimate",
+    "sent an estimate",
+    "sent estimate",
+    "estimate sent",
+    "estimation sent",
+    "sent for estimation",
+    "sent the scope",
+    "scope sent",
+    "sent scope",
+    "delivered the scope",
+    "scope delivered",
+    "delivered scope",
+    "sent for approval",
+    "sent for client approval",
+    "awaiting client approval",
+    "client approved",
+    "approved by client",
+    "started development",
+    "development started",
+    "started design",
+    "design started",
+    "moved to development",
+    "moved to design",
 ]
 
 
@@ -106,6 +145,20 @@ def looks_like_closure_signal(comment_text):
     return any(phrase in lowered for phrase in CLOSURE_SIGNAL_PHRASES)
 
 
+def find_progress_signal_comment(comments):
+    """
+    Returns (comment_text, created_str) for the first comment (in Jira's
+    returned order, oldest first) that matches PROGRESS_SIGNAL_PHRASES, or
+    (None, None) if none do.
+    """
+    for comment in comments:
+        text = adf_to_text(comment.get("body"))
+        lowered = text.lower()
+        if any(phrase in lowered for phrase in PROGRESS_SIGNAL_PHRASES):
+            return text, comment["created"]
+    return None, None
+
+
 def real_last_activity(issue, histories, comments):
     """
     The most recent point of real activity on a ticket: whichever is most
@@ -138,7 +191,7 @@ def staleness_level(last_activity, now=None):
     return "green", days
 
 
-def build_report(project_keys=None):
+def build_report(project_keys=None, statuses=None):
     """
     Pulls every open (not-Done) ticket for the tracked team/projects, works
     out each one's real last-activity date, and classifies it. Returns a
@@ -148,12 +201,24 @@ def build_report(project_keys=None):
     red / yellow / green for normal staleness, or ready_to_close when the
     latest comment sounds like a sign-off (see CLOSURE_SIGNAL_PHRASES).
 
+    "needs_status_update" is a separate True/False flag: the ticket's
+    status is literally "Open" but a comment shows real progress already
+    happened (see PROGRESS_SIGNAL_PHRASES). A ticket can be both, e.g. red
+    AND needing a status update.
+
     Pass project_keys (e.g. ["CSSD"] or ["CSSD", "IAP"]) to check only
     specific projects instead of every project in JIRA_PROJECT_KEYS.
+
+    Pass statuses (e.g. ["Open"] or ["Open", "Scoping"]) to check only
+    tickets currently sitting in those exact Jira statuses, instead of
+    every non-Done status.
     """
-    issues = jira_client.get_tickets(
-        project_keys=project_keys, extra_jql="statusCategory != Done"
-    )
+    extra_jql = "statusCategory != Done"
+    if statuses:
+        quoted_statuses = ", ".join(f'"{status}"' for status in statuses)
+        extra_jql += f" AND status in ({quoted_statuses})"
+
+    issues = jira_client.get_tickets(project_keys=project_keys, extra_jql=extra_jql)
 
     report = []
     for issue in issues:
@@ -168,18 +233,28 @@ def build_report(project_keys=None):
         category = "ready_to_close" if ready_to_close else level
 
         fields = issue["fields"]
+        status_name = fields["status"]["name"]
+
+        progress_comment, progress_comment_date = (None, None)
+        if status_name == "Open":
+            progress_comment, progress_comment_date = find_progress_signal_comment(comments)
+        needs_status_update = progress_comment is not None
+
         assignee = fields.get("assignee")
         report.append(
             {
                 "key": issue["key"],
                 "summary": fields["summary"],
-                "status": fields["status"]["name"],
+                "status": status_name,
                 "assignee": assignee["displayName"] if assignee else "Unassigned",
                 "last_real_activity": last_activity,
                 "days_inactive": round(days, 1),
                 "level": level,
                 "category": category,
                 "latest_comment": comment_text,
+                "needs_status_update": needs_status_update,
+                "progress_comment": progress_comment,
+                "progress_comment_date": progress_comment_date,
             }
         )
 

@@ -12,7 +12,8 @@ and staleness logic are done; no dashboard UI or Slack integration yet.
 - `staleness.py` — the business logic that decides if a ticket is stale.
   See "How staleness is calculated" below.
 - `check_staleness.py` — a script that prints every open ticket classified
-  red/yellow/green, plus a separate "Ready to Close" list.
+  red/yellow/green, plus separate "Ready to Close" and "Status Needs
+  Updating" lists.
 - `list_projects.py` — a script that lists every Jira project your account
   can see, with its real project key. Useful if you ever need to add or
   double check a project key.
@@ -71,6 +72,13 @@ and staleness logic are done; no dashboard UI or Slack integration yet.
    python check_staleness.py CSSD,IAP
    ```
 
+   To check only specific statuses, use `--status` (comma-separated, must
+   match Jira's exact status names):
+   ```
+   python check_staleness.py --status Open
+   python check_staleness.py CSSD --status Open,Scoping
+   ```
+
 ## Why the search endpoint looks the way it does
 
 Jira retired its old ticket-search API in May 2025. `jira_client.py` uses the
@@ -120,6 +128,27 @@ miss phrasings that aren't in the list and could occasionally misfire on a
 comment that happens to contain one of those phrases in a different sense.
 Treat it as a starting point — tell me what it gets wrong and I'll tune the
 phrase list.
+
+### The "Status Needs Updating" flag
+
+This is the flip side of Ready to Close, and it's the exact problem
+described in the original brief: a ticket sits on the generic **Open**
+status even though real progress happened — an estimate went out, a scope
+got delivered, development started. The status field itself is stale, even
+if the ticket isn't.
+
+For any ticket currently marked **Open**, `staleness.py` scans every
+comment (not just the latest, since the moment progress happened might be
+a few comments back) for phrases like "sent the estimate," "scope
+delivered," "started development," etc. — see `PROGRESS_SIGNAL_PHRASES` in
+`staleness.py`. If any comment matches, the ticket gets flagged
+`[STATUS NEEDS UPDATING]` in `check_staleness.py`'s output, with the
+matching comment shown so you can confirm it's right.
+
+This flag is independent of red/yellow/green/Ready to Close — a ticket can
+be both, e.g. red *and* needing its status moved off Open. Same caveat as
+above: it's a keyword list, so tell me what it misses or misfires on and
+I'll adjust it.
 
 ## What's next
 
