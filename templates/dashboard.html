@@ -59,9 +59,6 @@
         {% if row.needs_estimate %}<span class="tag">ESTIMATE</span>{% endif %}
       </td>
     </tr>
-    {% if row.needs_status_update %}
-    <tr><td colspan="6" class="comment-note">{{ row.progress_comment_author }} commented ({{ row.progress_comment_date }}): {{ row.progress_comment }}</td></tr>
-    {% endif %}
     {% if row.needs_estimate %}
     <tr><td colspan="6" class="comment-note">{{ row.estimate_request_by }} asked ({{ row.estimate_request_date }}): {{ row.estimate_request_text }}</td></tr>
     {% endif %}

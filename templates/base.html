@@ -51,7 +51,9 @@
     gap: 12px;
   }
   h1 { font-size: 18px; margin: 0; }
-  nav { display: flex; gap: 4px; flex-wrap: wrap; }
+  .nav-rows { display: flex; flex-direction: column; gap: 4px; }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+  .nav-label { color: var(--muted); font-size: 12px; margin-right: 2px; }
   nav a {
     color: var(--text-secondary);
     text-decoration: none;
@@ -144,12 +146,20 @@
       {% if refreshing %} — refreshing now…{% endif %}
     </div>
   </div>
-  <nav>
-    <a href="{{ url_for('dashboard') }}" class="{{ 'active' if title == 'Team Overview' else '' }}">Team Overview</a>
-    {% for member in team_members %}
-      <a href="{{ url_for('person', name=member) }}" class="{{ 'active' if title == member else '' }}">{{ member }}</a>
-    {% endfor %}
-  </nav>
+  <div class="nav-rows">
+    <nav>
+      <a href="{{ url_for('dashboard') }}" class="{{ 'active' if title == 'Team Overview' else '' }}">Team Overview</a>
+      {% for member in team_members %}
+        <a href="{{ url_for('person', name=member) }}" class="{{ 'active' if title == member else '' }}">{{ member }}</a>
+      {% endfor %}
+    </nav>
+    <nav>
+      <span class="nav-label">Project:</span>
+      {% for key in project_keys %}
+        <a href="{{ url_for('project', key=key) }}" class="{{ 'active' if title == key else '' }}">{{ key }}</a>
+      {% endfor %}
+    </nav>
+  </div>
   <form method="post" action="{{ url_for('refresh') }}">
     <button class="refresh" type="submit">Refresh now</button>
   </form>

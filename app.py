@@ -134,6 +134,7 @@ def build_context(report, title):
         "refreshing": refreshing,
         "error": error,
         "team_members": jira_client.TEAM_MEMBERS,
+        "project_keys": jira_client.PROJECT_KEYS,
         "refresh_minutes": REFRESH_MINUTES,
     }
 
@@ -152,6 +153,16 @@ def person(name):
     with _lock:
         report = [r for r in _state["report"] if r["assignee"] == name]
     return render_template("dashboard.html", **build_context(report, name))
+
+
+@app.route("/project/<key>")
+def project(key):
+    key = key.upper()
+    if key not in jira_client.PROJECT_KEYS:
+        abort(404)
+    with _lock:
+        report = [r for r in _state["report"] if r["key"].split("-")[0] == key]
+    return render_template("dashboard.html", **build_context(report, key))
 
 
 @app.route("/refresh", methods=["POST"])
