@@ -64,6 +64,13 @@ and staleness logic are done; no dashboard UI or Slack integration yet.
    slower than `test_connection.py` — expect roughly 1-2 seconds per open
    ticket, since it fetches each ticket's history and comments individually.
 
+   To check just one or a few projects instead of all of them, pass their
+   keys (comma-separated, no spaces):
+   ```
+   python check_staleness.py CSSD
+   python check_staleness.py CSSD,IAP
+   ```
+
 ## Why the search endpoint looks the way it does
 
 Jira retired its old ticket-search API in May 2025. `jira_client.py` uses the

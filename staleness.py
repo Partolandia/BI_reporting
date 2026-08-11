@@ -138,7 +138,7 @@ def staleness_level(last_activity, now=None):
     return "green", days
 
 
-def build_report():
+def build_report(project_keys=None):
     """
     Pulls every open (not-Done) ticket for the tracked team/projects, works
     out each one's real last-activity date, and classifies it. Returns a
@@ -147,8 +147,13 @@ def build_report():
     "category" is what should drive the dashboard/digest display:
     red / yellow / green for normal staleness, or ready_to_close when the
     latest comment sounds like a sign-off (see CLOSURE_SIGNAL_PHRASES).
+
+    Pass project_keys (e.g. ["CSSD"] or ["CSSD", "IAP"]) to check only
+    specific projects instead of every project in JIRA_PROJECT_KEYS.
     """
-    issues = jira_client.get_tickets(extra_jql="statusCategory != Done")
+    issues = jira_client.get_tickets(
+        project_keys=project_keys, extra_jql="statusCategory != Done"
+    )
 
     report = []
     for issue in issues:
