@@ -1,8 +1,8 @@
 # Jira Ticket Monitoring Dashboard
 
 Tracks tickets in the CSSD, PIE, ACP, and IAP Jira projects and flags ones
-that have gone stale — see the project brief for the full plan. Connection
-and staleness logic are done; no dashboard UI or Slack integration yet.
+that have gone stale — see the project brief for the full plan. Connection,
+staleness logic, and the web dashboard are done; Slack digest is next.
 
 ## What's here so far
 
@@ -18,6 +18,8 @@ and staleness logic are done; no dashboard UI or Slack integration yet.
 - `list_projects.py` — a script that lists every Jira project your account
   can see, with its real project key. Useful if you ever need to add or
   double check a project key.
+- `app.py` + `templates/` — the web dashboard. See "Running the dashboard"
+  below.
 - `.env.example` — template for your credentials. Copy it to `.env` and fill
   in your real values. `.env` is listed in `.gitignore`, so it never gets
   committed to git or pushed to GitHub — your token stays local to your
@@ -81,6 +83,46 @@ and staleness logic are done; no dashboard UI or Slack integration yet.
    python check_staleness.py --status Open
    python check_staleness.py CSSD --status Open,Scoping
    ```
+
+## Running the dashboard
+
+```
+python app.py
+```
+
+Then open **http://localhost:5000** in your browser. You'll see:
+
+- **Team Overview** by default, plus a tab for each of the 7 team members
+  (their tickets only) along the top.
+- **Stat tiles** for Urgent, Red, Yellow, Green, Ready to Close, Status
+  Needs Updating, and Needs Estimate.
+- An **Urgent** section and a **Needs Estimate** section up top, then
+  Red / Yellow / Ready to Close / Green tables below — the same sections
+  and rules as `check_staleness.py`, just as a web page instead of terminal
+  text.
+
+**Why it loads instantly instead of taking minutes:** a full pull (change
+history + comments for every ticket) is slow, the same as
+`check_staleness.py`. So `app.py` doesn't do that pull on every page
+load — instead it refreshes in the background every `JIRA_REFRESH_MINUTES`
+(default 30, set in `.env`) and always serves the last completed pull
+instantly. The header shows "Last updated <time>" so you know how fresh
+the data is. There's also a **Refresh now** button for an on-demand pull —
+it runs in the background too, so the page won't hang; give it a minute or
+two, then reload to see the update.
+
+The last successful pull is saved to `dashboard_cache.json` (not committed
+to git), so if you restart `python app.py`, the dashboard shows the
+last-known data immediately instead of an empty page while the first
+background refresh runs.
+
+**This is a local, single-user tool.** Run it with `python app.py` on your
+own computer and leave that terminal window open while you use it (Ctrl+C
+to stop). It is *not* set up to be reachable by anyone else or hosted on a
+server — putting this somewhere the rest of the team could open in their
+own browser is a reasonable next step, but it deserves its own
+conversation first, since it means deciding where the Jira token lives and
+who can reach the page.
 
 ## Why the search endpoint looks the way it does
 
@@ -222,6 +264,7 @@ python check_staleness.py --status "Awaiting Implementation"
 
 ## What's next
 
-1. Build the dashboard (green/yellow/red flagging, by-person and team views,
-   an "At Risk" section) — using `check_staleness.py`'s logic as the engine.
-2. Wire up a scheduled pull and a daily Slack digest.
+1. Daily Slack digest summarizing stale/urgent tickets, so the team doesn't
+   need to open the dashboard to stay aware.
+2. If wanted: hosting the dashboard somewhere the whole team can reach it
+   (a separate conversation — see "Running the dashboard" above).

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }} - Ticket Dashboard</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --border: rgba(11,11,11,0.10);
+    --good: #0ca30c;
+    --warning: #fab219;
+    --serious: #ec835a;
+    --critical: #d03b3b;
+    --info: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --page: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --border: rgba(255,255,255,0.10);
+      --info: #3987e5;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page);
+    color: var(--text-primary);
+  }
+  header {
+    background: var(--surface-1);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  h1 { font-size: 18px; margin: 0; }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; }
+  nav a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  nav a:hover, nav a.active { background: var(--grid); color: var(--text-primary); }
+  main { padding: 24px; max-width: 1100px; margin: 0 auto; }
+  .meta { color: var(--muted); font-size: 12px; }
+  button.refresh {
+    font: inherit;
+    font-size: 13px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+  button.refresh:hover { background: var(--grid); }
+  .banner {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--info);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .banner.error { border-left-color: var(--critical); color: var(--critical); }
+  .stat-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+  .stat-tile {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .stat-tile .value { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat-tile .label { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+  .stat-tile.critical .value { color: var(--critical); }
+  .stat-tile.warning .value { color: var(--warning); }
+  .stat-tile.good .value { color: var(--good); }
+  section.group { margin-bottom: 28px; }
+  section.group h2 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    border-bottom: 2px solid var(--grid);
+    padding-bottom: 6px;
+    margin-bottom: 10px;
+  }
+  section.group.urgent h2, section.group.red h2 { color: var(--critical); border-bottom-color: var(--critical); }
+  section.group.yellow h2 { color: var(--warning); border-bottom-color: var(--warning); }
+  section.group.green h2 { color: var(--good); border-bottom-color: var(--good); }
+  section.group.ready_to_close h2, section.group.info h2 { color: var(--info); border-bottom-color: var(--info); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-left: 4px;
+    background: var(--serious);
+    color: #fff;
+  }
+  .party { font-size: 12px; color: var(--text-secondary); }
+  .comment-note { color: var(--text-secondary); font-size: 12px; padding: 0 10px 10px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+  footer { padding: 24px; text-align: center; color: var(--muted); font-size: 12px; }
+  .overflow { overflow-x: auto; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Jira Ticket Dashboard</h1>
+    <div class="meta">
+      {% if last_refreshed %}Last updated {{ last_refreshed }}{% else %}Not refreshed yet{% endif %}
+      {% if refreshing %} — refreshing now…{% endif %}
+    </div>
+  </div>
+  <nav>
+    <a href="{{ url_for('dashboard') }}" class="{{ 'active' if title == 'Team Overview' else '' }}">Team Overview</a>
+    {% for member in team_members %}
+      <a href="{{ url_for('person', name=member) }}" class="{{ 'active' if title == member else '' }}">{{ member }}</a>
+    {% endfor %}
+  </nav>
+  <form method="post" action="{{ url_for('refresh') }}">
+    <button class="refresh" type="submit">Refresh now</button>
+  </form>
+</header>
+<main>
+  {% if error %}
+    <div class="banner error">Last refresh failed: {{ error }}</div>
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+<footer>Refreshes automatically every {{ refresh_minutes }} minutes.</footer>
+</body>
+</html>

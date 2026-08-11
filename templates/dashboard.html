@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 style="font-size:20px;margin:0 0 16px;font-weight:600;">{{ title }}</h2>
+
+<div class="stat-tiles">
+  <div class="stat-tile critical">
+    <div class="value">{{ urgent_rows|length }}</div>
+    <div class="label">Urgent</div>
+  </div>
+  <div class="stat-tile critical">
+    <div class="value">{{ counts.red }}</div>
+    <div class="label">Red</div>
+  </div>
+  <div class="stat-tile warning">
+    <div class="value">{{ counts.yellow }}</div>
+    <div class="label">Yellow</div>
+  </div>
+  <div class="stat-tile good">
+    <div class="value">{{ counts.green }}</div>
+    <div class="label">Green</div>
+  </div>
+  <div class="stat-tile">
+    <div class="value">{{ counts.ready_to_close }}</div>
+    <div class="label">Ready to Close</div>
+  </div>
+  <div class="stat-tile">
+    <div class="value">{{ needs_status_update_count }}</div>
+    <div class="label">Status Needs Updating</div>
+  </div>
+  <div class="stat-tile">
+    <div class="value">{{ needs_estimate_rows|length }}</div>
+    <div class="label">Needs Estimate</div>
+  </div>
+</div>
+
+{% if total == 0 %}
+  <p class="empty">
+    No tickets loaded yet{% if refreshing %} — the first refresh is in progress, check back in a bit{% else %} — click "Refresh now" above{% endif %}.
+  </p>
+{% endif %}
+
+{% macro ticket_table(rows) %}
+<div class="overflow">
+<table>
+  <thead>
+    <tr><th>Key</th><th>Days</th><th>Status</th><th>Responsible</th><th>Assignee</th><th>Summary</th></tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td>{{ row.key }}</td>
+      <td>{{ row.days_inactive }}</td>
+      <td>{{ row.status }}</td>
+      <td class="party">{{ row.responsible_party }}</td>
+      <td>{{ row.assignee }}</td>
+      <td>
+        {{ row.summary }}
+        {% if row.needs_status_update %}<span class="tag">STATUS</span>{% endif %}
+        {% if row.needs_estimate %}<span class="tag">ESTIMATE</span>{% endif %}
+      </td>
+    </tr>
+    {% if row.needs_status_update %}
+    <tr><td colspan="6" class="comment-note">{{ row.progress_comment_author }} commented ({{ row.progress_comment_date }}): {{ row.progress_comment }}</td></tr>
+    {% endif %}
+    {% if row.needs_estimate %}
+    <tr><td colspan="6" class="comment-note">{{ row.estimate_request_by }} asked ({{ row.estimate_request_date }}): {{ row.estimate_request_text }}</td></tr>
+    {% endif %}
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endmacro %}
+
+{% if urgent_rows %}
+<section class="group urgent">
+  <h2>Urgent — needs attention now ({{ urgent_rows|length }})</h2>
+  {{ ticket_table(urgent_rows) }}
+</section>
+{% endif %}
+
+{% if needs_estimate_rows %}
+<section class="group info">
+  <h2>Needs Estimate ({{ needs_estimate_rows|length }})</h2>
+  {{ ticket_table(needs_estimate_rows) }}
+</section>
+{% endif %}
+
+{% for category in category_order %}
+  {% set rows = groups[category] %}
+  {% if rows %}
+  <section class="group {{ category }}">
+    <h2>{{ category_labels[category] }} ({{ rows|length }})</h2>
+    {{ ticket_table(rows) }}
+  </section>
+  {% endif %}
+{% endfor %}
+{% endblock %}
