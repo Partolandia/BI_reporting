@@ -1,5 +1,6 @@
 """
-Connects to Jira Cloud and pulls tickets for the projects we track (CSSD, IIP, ACPD).
+Connects to Jira Cloud and pulls tickets for the projects we track
+(CSSD, PIE, ACP, IAP).
 
 Auth: Jira Cloud uses "basic auth" over HTTPS, where the "password" is an API
 token instead of your real password. Docs: id.atlassian.com/manage-profile/security/api-tokens

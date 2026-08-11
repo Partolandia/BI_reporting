@@ -3,7 +3,7 @@ Run this to confirm the Jira connection works:
 
     python test_connection.py
 
-It connects to Jira, pulls tickets from the CSSD, IIP, and ACPD projects,
+It connects to Jira, pulls tickets from the CSSD, PIE, ACP, and IAP projects,
 and prints a summary table plus a per-project count so you can eyeball that
 the numbers look right compared to what you see in Jira.
 """

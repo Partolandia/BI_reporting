@@ -1,6 +1,6 @@
 # Jira Ticket Monitoring Dashboard
 
-Tracks tickets in the CSSD, IIP, and ACPD Jira projects and (eventually) flags
+Tracks tickets in the CSSD, PIE, ACP, and IAP Jira projects and (eventually) flags
 ones that have gone stale — see the project brief for the full plan. This is
 step 1: a working connection to Jira that pulls raw ticket data. No dashboard
 or Slack integration yet.
