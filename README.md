@@ -1,14 +1,21 @@
 # Jira Ticket Monitoring Dashboard
 
-Tracks tickets in the CSSD, PIE, ACP, and IAP Jira projects and (eventually) flags
-ones that have gone stale — see the project brief for the full plan. This is
-step 1: a working connection to Jira that pulls raw ticket data. No dashboard
-or Slack integration yet.
+Tracks tickets in the CSSD, PIE, ACP, and IAP Jira projects and flags ones
+that have gone stale — see the project brief for the full plan. Connection
+and staleness logic are done; no dashboard UI or Slack integration yet.
 
 ## What's here so far
 
-- `jira_client.py` — connects to Jira and fetches tickets via the REST API.
+- `jira_client.py` — connects to Jira and fetches tickets and their change
+  history via the REST API.
 - `test_connection.py` — a script you run to prove the connection works.
+- `staleness.py` — the business logic that decides if a ticket is stale.
+  See "How staleness is calculated" below.
+- `check_staleness.py` — a script that prints every open ticket classified
+  green/yellow/red.
+- `list_projects.py` — a script that lists every Jira project your account
+  can see, with its real project key. Useful if you ever need to add or
+  double check a project key.
 - `.env.example` — template for your credentials. Copy it to `.env` and fill
   in your real values. `.env` is listed in `.gitignore`, so it never gets
   committed to git or pushed to GitHub — your token stays local to your
@@ -47,6 +54,16 @@ or Slack integration yet.
    error message will usually tell you whether it's a credentials problem
    (401/403) or something else.
 
+5. **Run the staleness check**:
+   ```
+   python check_staleness.py
+   ```
+   This pulls every *open* ticket (skips ones already Done) for the team,
+   fetches each one's change history, and prints a RED/YELLOW/GREEN table
+   plus a summary count. It's slower than `test_connection.py` — expect
+   roughly 1 second per open ticket, since it fetches each ticket's history
+   individually.
+
 ## Why the search endpoint looks the way it does
 
 Jira retired its old ticket-search API in May 2025. `jira_client.py` uses the
@@ -54,13 +71,33 @@ current one (`/rest/api/3/search/jql`), which pages through results using a
 token instead of a simple offset — that's handled for you inside
 `get_tickets()`, nothing to configure.
 
+## How staleness is calculated
+
+This is the important part, since it's the whole point of the dashboard.
+
+A ticket's generic **status** field (Open, In Progress, etc.) isn't trusted
+on its own — people often leave it on "Open" even after real progress has
+happened. So instead, for each open ticket we look at three dates and take
+whichever is **most recent**:
+
+1. When the ticket was **created**
+2. The last time its **status actually changed** (pulled from Jira's change
+   history, not the status label itself)
+3. The last time someone **commented** on it
+
+That "most recent of the three" date is the ticket's *real last activity*.
+Staleness is how many days have passed since then:
+
+- **Green** — less than 2 days since real last activity
+- **Yellow** — 2 to 3 days
+- **Red** — 3+ days (this is the "stale" / needs-attention flag)
+
+So a ticket sitting on "Open" that got a client-approval comment yesterday
+shows green, while a ticket sitting on "In Design" that nobody has touched
+in 4 days shows red — which is exactly the distinction the team needs.
+
 ## What's next
 
-Once the connection is confirmed working, next steps per the project brief:
-
-1. Pull ticket **change history** (not just the current status) so we can
-   tell the difference between "status field still says Open" and "nothing
-   has actually happened in 3+ days" — this is the core staleness logic.
-2. Build the dashboard (green/yellow/red flagging, by-person and team views,
-   an "At Risk" section).
-3. Wire up a scheduled pull and a daily Slack digest.
+1. Build the dashboard (green/yellow/red flagging, by-person and team views,
+   an "At Risk" section) — using `check_staleness.py`'s logic as the engine.
+2. Wire up a scheduled pull and a daily Slack digest.

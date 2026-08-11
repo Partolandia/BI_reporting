@@ -92,6 +92,37 @@ def get_tickets(project_keys=None, extra_jql=None, page_size=100):
     return issues
 
 
+def get_changelog(issue_key):
+    """
+    Pull the full change history for one ticket via
+    GET /rest/api/3/issue/{key}/changelog: every field change ever made,
+    with a timestamp. We use this to find the last time the "status" field
+    actually changed, as opposed to the ticket's generic "updated" date
+    (which can bump for reasons that aren't real progress).
+    """
+    url = f"{SITE_URL}/rest/api/3/issue/{issue_key}/changelog"
+    histories = []
+    start_at = 0
+
+    while True:
+        response = requests.get(
+            url,
+            auth=_auth(),
+            params={"startAt": start_at, "maxResults": 100},
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        histories.extend(data["values"])
+
+        if data.get("isLast", True):
+            break
+        start_at += len(data["values"])
+
+    return histories
+
+
 def summarize(issue):
     """Pull out the handful of fields we actually care about for display."""
     fields = issue["fields"]
