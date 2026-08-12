@@ -2,7 +2,7 @@
 
 Tracks tickets in the CSSD, PIE, ACP, and IAP Jira projects and flags ones
 that have gone stale — see the project brief for the full plan. Connection,
-staleness logic, and the web dashboard are done; Slack digest is next.
+staleness logic, the web dashboard, and the Slack digest are all done.
 
 ## What's here so far
 
@@ -19,6 +19,8 @@ staleness logic, and the web dashboard are done; Slack digest is next.
   can see, with its real project key. Useful if you ever need to add or
   double check a project key.
 - `app.py` + `templates/` — the web dashboard. See "Running the dashboard"
+  below.
+- `slack_digest.py` — posts a daily summary to Slack. See "Slack digest"
   below.
 - `.env.example` — template for your credentials. Copy it to `.env` and fill
   in your real values. `.env` is listed in `.gitignore`, so it never gets
@@ -151,6 +153,59 @@ unrelated to this app.
    server.
 3. If the terminal shows a different error (not a port message), paste it
    back here and I'll take a look.
+
+## Slack digest
+
+Posts a daily summary to a Slack channel, so the team doesn't need to open
+the dashboard to stay aware.
+
+**One-time setup:** create a Slack Incoming Webhook (see below) and add
+its URL to `.env` as `SLACK_WEBHOOK_URL`.
+
+1. Go to https://api.slack.com/apps → **Create New App** → **From scratch**.
+   Name it something like "Ticket Digest" and pick your workspace.
+2. In the left sidebar, click **Incoming Webhooks** → toggle it **On**.
+3. Click **Add New Webhook to Workspace**, choose the channel the digest
+   should post to, click **Allow**.
+4. Copy the webhook URL (starts with `https://hooks.slack.com/services/...`)
+   into `.env`:
+   ```
+   SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+   ```
+
+**To send it:**
+```
+python slack_digest.py
+```
+This pulls fresh data from Jira (a few minutes, same as
+`check_staleness.py`) and posts a message with the same counts as the
+dashboard's stat tiles, plus the full **Urgent**, **Needs Estimate**, and
+**Status Needs Updating** lists (each ticket key links straight to Jira).
+Each list is capped at 15 rows to keep the message a reasonable size — if
+there are more, it says how many more and points to the dashboard for the
+rest.
+
+**To run it automatically every day**, use Windows Task Scheduler rather
+than leaving a terminal window open all day:
+
+1. Open **Task Scheduler** (Start menu → search "Task Scheduler").
+2. Click **Create Basic Task** in the right-hand panel.
+3. Name it "Jira Ticket Digest", click Next.
+4. Trigger: **Daily**, click Next, set the time you want it to send (e.g.
+   8:00 AM), click Next.
+5. Action: **Start a program**, click Next.
+6. Program/script: the full path to your Python, e.g.
+   `C:\Users\<you>\AppData\Local\Programs\Python\Python313\python.exe`
+   (run `where python` in Git Bash if you're not sure of the exact path).
+7. Add arguments: `slack_digest.py`
+8. Start in: the full path to this project folder, e.g.
+   `C:\Users\<you>\Documents\BI_reporting`
+9. Click Next, then **Finish**.
+
+Task Scheduler will now run the digest every day at that time, whether or
+not you're logged in (as long as your computer is on). You can test it
+immediately by right-clicking the task in Task Scheduler and choosing
+**Run**.
 
 ## Why the search endpoint looks the way it does
 
@@ -292,7 +347,8 @@ python check_staleness.py --status "Awaiting Implementation"
 
 ## What's next
 
-1. Daily Slack digest summarizing stale/urgent tickets, so the team doesn't
-   need to open the dashboard to stay aware.
-2. If wanted: hosting the dashboard somewhere the whole team can reach it
-   (a separate conversation — see "Running the dashboard" above).
+All the features from the original brief are built. If wanted, next steps
+could include hosting the dashboard somewhere the whole team can reach it
+(a separate conversation — see "Running the dashboard" above), or having
+the Slack digest post to Task Scheduler automatically once it's set up
+(see "Slack digest" above).
