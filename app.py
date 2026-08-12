@@ -101,13 +101,13 @@ def _background_loop():
 
 def build_context(report, title):
     counts = {c: 0 for c in CATEGORY_ORDER}
-    needs_status_update_count = 0
+    needs_status_update_rows = []
     needs_estimate_rows = []
     urgent_rows = []
     for row in report:
         counts[row["category"]] += 1
         if row["needs_status_update"]:
-            needs_status_update_count += 1
+            needs_status_update_rows.append(row)
         if row["needs_estimate"]:
             needs_estimate_rows.append(row)
         if row["urgent"]:
@@ -124,7 +124,7 @@ def build_context(report, title):
         "title": title,
         "total": len(report),
         "counts": counts,
-        "needs_status_update_count": needs_status_update_count,
+        "needs_status_update_rows": needs_status_update_rows,
         "needs_estimate_rows": needs_estimate_rows,
         "urgent_rows": urgent_rows,
         "groups": groups,
@@ -136,6 +136,7 @@ def build_context(report, title):
         "team_members": jira_client.TEAM_MEMBERS,
         "project_keys": jira_client.PROJECT_KEYS,
         "refresh_minutes": REFRESH_MINUTES,
+        "jira_site_url": jira_client.SITE_URL,
     }
 
 

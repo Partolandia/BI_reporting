@@ -3,34 +3,38 @@
 <h2 style="font-size:20px;margin:0 0 16px;font-weight:600;">{{ title }}</h2>
 
 <div class="stat-tiles">
-  <div class="stat-tile critical">
+  <div class="stat-tile">
+    <div class="value">{{ total }}</div>
+    <div class="label">Total Tickets</div>
+  </div>
+  <a class="stat-tile critical" href="#section-urgent">
     <div class="value">{{ urgent_rows|length }}</div>
     <div class="label">Urgent</div>
-  </div>
-  <div class="stat-tile critical">
+  </a>
+  <a class="stat-tile critical" href="#section-red">
     <div class="value">{{ counts.red }}</div>
     <div class="label">Red</div>
-  </div>
-  <div class="stat-tile warning">
+  </a>
+  <a class="stat-tile warning" href="#section-yellow">
     <div class="value">{{ counts.yellow }}</div>
     <div class="label">Yellow</div>
-  </div>
-  <div class="stat-tile good">
+  </a>
+  <a class="stat-tile good" href="#section-green">
     <div class="value">{{ counts.green }}</div>
     <div class="label">Green</div>
-  </div>
-  <div class="stat-tile">
+  </a>
+  <a class="stat-tile" href="#section-ready_to_close">
     <div class="value">{{ counts.ready_to_close }}</div>
     <div class="label">Ready to Close</div>
-  </div>
-  <div class="stat-tile">
-    <div class="value">{{ needs_status_update_count }}</div>
+  </a>
+  <a class="stat-tile" href="#section-status">
+    <div class="value">{{ needs_status_update_rows|length }}</div>
     <div class="label">Status Needs Updating</div>
-  </div>
-  <div class="stat-tile">
+  </a>
+  <a class="stat-tile" href="#section-estimate">
     <div class="value">{{ needs_estimate_rows|length }}</div>
     <div class="label">Needs Estimate</div>
-  </div>
+  </a>
 </div>
 
 {% if total == 0 %}
@@ -48,7 +52,7 @@
   <tbody>
     {% for row in rows %}
     <tr>
-      <td>{{ row.key }}</td>
+      <td class="key-cell"><a href="{{ jira_site_url }}/browse/{{ row.key }}" target="_blank" rel="noopener">{{ row.key }}</a></td>
       <td>{{ row.days_inactive }}</td>
       <td>{{ row.status }}</td>
       <td class="party">{{ row.responsible_party }}</td>
@@ -69,23 +73,30 @@
 {% endmacro %}
 
 {% if urgent_rows %}
-<section class="group urgent">
+<section class="group urgent" id="section-urgent">
   <h2>Urgent — needs attention now ({{ urgent_rows|length }})</h2>
   {{ ticket_table(urgent_rows) }}
 </section>
 {% endif %}
 
 {% if needs_estimate_rows %}
-<section class="group info">
+<section class="group info" id="section-estimate">
   <h2>Needs Estimate ({{ needs_estimate_rows|length }})</h2>
   {{ ticket_table(needs_estimate_rows) }}
+</section>
+{% endif %}
+
+{% if needs_status_update_rows %}
+<section class="group info" id="section-status">
+  <h2>Status Needs Updating ({{ needs_status_update_rows|length }})</h2>
+  {{ ticket_table(needs_status_update_rows) }}
 </section>
 {% endif %}
 
 {% for category in category_order %}
   {% set rows = groups[category] %}
   {% if rows %}
-  <section class="group {{ category }}">
+  <section class="group {{ category }}" id="section-{{ category }}">
     <h2>{{ category_labels[category] }} ({{ rows|length }})</h2>
     {{ ticket_table(rows) }}
   </section>

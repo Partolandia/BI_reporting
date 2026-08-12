@@ -93,13 +93,19 @@ python app.py
 Then open **http://localhost:5000** in your browser. You'll see:
 
 - **Team Overview** by default, plus a tab for each of the 7 team members
-  (their tickets only) along the top.
-- **Stat tiles** for Urgent, Red, Yellow, Green, Ready to Close, Status
-  Needs Updating, and Needs Estimate.
-- An **Urgent** section and a **Needs Estimate** section up top, then
-  Red / Yellow / Ready to Close / Green tables below — the same sections
-  and rules as `check_staleness.py`, just as a web page instead of terminal
-  text.
+  and a `Project:` row (CSSD/PIE/ACP/IAP) — click either to filter, using
+  the already-cached data so it's instant, no new Jira pull.
+- **Stat tiles** for Total Tickets, Urgent, Red, Yellow, Green, Ready to
+  Close, Status Needs Updating, and Needs Estimate. Total Tickets always
+  reflects whichever filter is active (Team Overview, a person, or a
+  project). Every tile except Total Tickets is clickable and jumps down to
+  that section on the page.
+- An **Urgent**, **Needs Estimate**, and **Status Needs Updating** section
+  up top, then Red / Yellow / Ready to Close / Green tables below — the
+  same sections and rules as `check_staleness.py`, just as a web page
+  instead of terminal text.
+- Every ticket **key is a link** straight to that ticket in Jira (opens in
+  a new tab).
 
 **Why it loads instantly instead of taking minutes:** a full pull (change
 history + comments for every ticket) is slow, the same as
