@@ -38,6 +38,7 @@ from staleness import build_report
 load_dotenv()
 
 REFRESH_MINUTES = int(os.environ.get("JIRA_REFRESH_MINUTES", "30"))
+PORT = int(os.environ.get("JIRA_DASHBOARD_PORT", "5050"))
 CACHE_FILE = Path(__file__).parent / "dashboard_cache.json"
 
 CATEGORY_ORDER = ["red", "yellow", "ready_to_close", "green"]
@@ -175,6 +176,8 @@ def refresh():
 if __name__ == "__main__":
     _load_cache_from_disk()
     threading.Thread(target=_background_loop, daemon=True).start()
-    print(f"Dashboard starting -- open http://localhost:5000 in your browser")
+    print(f"Dashboard starting -- open http://localhost:{PORT} in your browser")
     print(f"Refreshing in the background every {REFRESH_MINUTES} minutes.")
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    # If this port is already taken, Flask's dev server prints its own clear
+    # "Address already in use" message and exits -- nothing extra needed here.
+    app.run(host="127.0.0.1", port=PORT, debug=False)

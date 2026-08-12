@@ -90,7 +90,9 @@ staleness logic, and the web dashboard are done; Slack digest is next.
 python app.py
 ```
 
-Then open **http://localhost:5000** in your browser. You'll see:
+Then open **http://localhost:5050** in your browser (or whatever port you
+set `JIRA_DASHBOARD_PORT` to in `.env` — see "If the page won't load"
+below if 5050 doesn't work either). You'll see:
 
 - **Team Overview** by default, plus a tab for each of the 7 team members
   and a `Project:` row (CSSD/PIE/ACP/IAP) — click either to filter, using
@@ -129,6 +131,26 @@ server — putting this somewhere the rest of the team could open in their
 own browser is a reasonable next step, but it deserves its own
 conversation first, since it means deciding where the Jira token lives and
 who can reach the page.
+
+### If the page won't load ("connection refused")
+
+This means the terminal running `python app.py` isn't actually listening
+on that port — usually because something else on your computer already
+has it. The dashboard defaults to port **5050** (not the more common 5000)
+specifically because Windows often reserves port 5000 for Hyper-V/WSL,
+unrelated to this app.
+
+1. Check the terminal where you ran `python app.py`. If it printed
+   `Couldn't start the dashboard on port ...`, that confirms a port
+   conflict — pick a different number and add it to `.env`:
+   ```
+   JIRA_DASHBOARD_PORT=5051
+   ```
+   then run `python app.py` again and open `http://localhost:5051`.
+2. Make sure that terminal window is still open — closing it stops the
+   server.
+3. If the terminal shows a different error (not a port message), paste it
+   back here and I'll take a look.
 
 ## Why the search endpoint looks the way it does
 
