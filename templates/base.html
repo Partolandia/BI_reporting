@@ -167,6 +167,14 @@
         <a href="{{ url_for('project', key=key) }}" class="{{ 'active' if title == key else '' }}">{{ key }}</a>
       {% endfor %}
     </nav>
+    {% if quick_filter_statuses %}
+    <nav>
+      <span class="nav-label">Quick filter:</span>
+      {% for status in quick_filter_statuses %}
+        <a href="{{ url_for('status_filter', status_name=status) }}" class="{{ 'active' if title == status else '' }}">{{ status }}</a>
+      {% endfor %}
+    </nav>
+    {% endif %}
   </div>
   <form method="post" action="{{ url_for('refresh') }}">
     <button class="refresh" type="submit">Refresh now</button>

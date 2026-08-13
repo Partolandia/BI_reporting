@@ -96,9 +96,12 @@ Then open **http://localhost:5050** in your browser (or whatever port you
 set `JIRA_DASHBOARD_PORT` to in `.env` — see "If the page won't load"
 below if 5050 doesn't work either). You'll see:
 
-- **Team Overview** by default, plus a tab for each of the 7 team members
-  and a `Project:` row (CSSD/PIE/ACP/IAP) — click either to filter, using
-  the already-cached data so it's instant, no new Jira pull.
+- **Team Overview** by default, plus a tab for each of the 7 team members,
+  a `Project:` row (CSSD/PIE/ACP/IAP), and a `Quick filter:` row (currently
+  just **Waiting for Approval**, for following up with clients on tickets
+  sitting on their approval) — click any of these to filter, using the
+  already-cached data so it's instant, no new Jira pull. More quick
+  filters can be added easily — just say which status.
 - **Stat tiles** for Total Tickets, Urgent, Red, Yellow, Green, Ready to
   Close, Status Needs Updating, and Needs Estimate. Total Tickets always
   reflects whichever filter is active (Team Overview, a person, or a

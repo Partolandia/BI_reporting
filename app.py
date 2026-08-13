@@ -49,6 +49,13 @@ CATEGORY_LABELS = {
     "green": "Green",
 }
 
+# Statuses with a dedicated quick-filter link in the nav (e.g. for
+# following up with clients on tickets waiting on their approval). Add
+# more status names here for other one-off filters -- the /status/<name>
+# route behind it works for any status, this list just controls what shows
+# up as a clickable shortcut.
+QUICK_FILTER_STATUSES = ["Waiting for Approval"]
+
 app = Flask(__name__)
 
 _lock = threading.Lock()
@@ -136,6 +143,7 @@ def build_context(report, title):
         "error": error,
         "team_members": jira_client.TEAM_MEMBERS,
         "project_keys": jira_client.PROJECT_KEYS,
+        "quick_filter_statuses": QUICK_FILTER_STATUSES,
         "refresh_minutes": REFRESH_MINUTES,
         "jira_site_url": jira_client.SITE_URL,
     }
@@ -165,6 +173,13 @@ def project(key):
     with _lock:
         report = [r for r in _state["report"] if r["key"].split("-")[0] == key]
     return render_template("dashboard.html", **build_context(report, key))
+
+
+@app.route("/status/<path:status_name>")
+def status_filter(status_name):
+    with _lock:
+        report = [r for r in _state["report"] if r["status"] == status_name]
+    return render_template("dashboard.html", **build_context(report, status_name))
 
 
 @app.route("/refresh", methods=["POST"])

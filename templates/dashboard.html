@@ -39,7 +39,11 @@
 
 {% if total == 0 %}
   <p class="empty">
-    No tickets loaded yet{% if refreshing %} — the first refresh is in progress, check back in a bit{% else %} — click "Refresh now" above{% endif %}.
+    {% if last_refreshed %}
+      No tickets currently match this view.
+    {% else %}
+      No tickets loaded yet{% if refreshing %} — the first refresh is in progress, check back in a bit{% else %} — click "Refresh now" above{% endif %}.
+    {% endif %}
   </p>
 {% endif %}
 
