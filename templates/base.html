@@ -51,6 +51,8 @@
     gap: 12px;
   }
   h1 { font-size: 18px; margin: 0; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo { height: 40px; width: auto; border-radius: 6px; display: block; }
   .nav-rows { display: flex; flex-direction: column; gap: 4px; }
   nav { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
   .nav-label { color: var(--muted); font-size: 12px; margin-right: 2px; }
@@ -147,11 +149,14 @@
 </head>
 <body>
 <header>
-  <div>
-    <h1>Jira Ticket Dashboard</h1>
-    <div class="meta">
-      {% if last_refreshed %}Last updated {{ last_refreshed }}{% else %}Not refreshed yet{% endif %}
-      {% if refreshing %} — refreshing now…{% endif %}
+  <div class="brand">
+    <img class="logo" src="{{ url_for('static', filename='allvue-bi-logo.jpg') }}" alt="Allvue BI Reporting team">
+    <div>
+      <h1>Jira Ticket Dashboard</h1>
+      <div class="meta">
+        {% if last_refreshed %}Last updated {{ last_refreshed }}{% else %}Not refreshed yet{% endif %}
+        {% if refreshing %} — refreshing now…{% endif %}
+      </div>
     </div>
   </div>
   <div class="nav-rows">
