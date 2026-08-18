@@ -103,6 +103,11 @@ below if 5050 doesn't work either). You'll see:
   **Standish Management**) — click any of these to filter, using the
   already-cached data so it's instant, no new Jira pull. More quick
   filters or clients can be added easily — just say which one.
+- A **search box** in the header — type a project key (`CSSD`), a full
+  ticket key (`CSSD-6534`), or even just a ticket number (`6534`) and hit
+  Search. It matches anything typed as a substring of the ticket key
+  (case-insensitive), so it works for "show me this whole project" and
+  "find this one specific ticket" alike.
 - **Stat tiles** for Total Tickets, Urgent, Red, Yellow, Green, Ready to
   Close, Status Needs Updating, and Needs Estimate. Total Tickets always
   reflects whichever filter is active (Team Overview, a person, or a

@@ -77,6 +77,19 @@
     cursor: pointer;
   }
   button.refresh:hover { background: var(--grid); }
+  .header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .search-form { display: flex; gap: 6px; }
+  .search-form input {
+    font: inherit;
+    font-size: 13px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+    color: var(--text-primary);
+    width: 220px;
+  }
+  .search-form input::placeholder { color: var(--muted); }
   .banner {
     background: var(--surface-1);
     border: 1px solid var(--border);
@@ -189,9 +202,15 @@
     </nav>
     {% endif %}
   </div>
-  <form method="post" action="{{ url_for('refresh') }}">
-    <button class="refresh" type="submit">Refresh now</button>
-  </form>
+  <div class="header-actions">
+    <form class="search-form" method="get" action="{{ url_for('search') }}">
+      <input type="text" name="q" placeholder="Search key (CSSD-6534)" value="{{ search_query|default('') }}">
+      <button class="refresh" type="submit">Search</button>
+    </form>
+    <form method="post" action="{{ url_for('refresh') }}">
+      <button class="refresh" type="submit">Refresh now</button>
+    </form>
+  </div>
 </header>
 <main>
   {% if error %}

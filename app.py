@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, abort, redirect, render_template, url_for
+from flask import Flask, abort, redirect, render_template, request, url_for
 
 import jira_client
 from staleness import build_report
@@ -201,6 +201,16 @@ def client_filter(name):
     with _lock:
         report = [r for r in _state["report"] if any(k in r["summary"].lower() for k in keywords)]
     return render_template("dashboard.html", **build_context(report, name))
+
+
+@app.route("/search")
+def search():
+    query = request.args.get("q", "").strip()
+    if not query:
+        return redirect(url_for("dashboard"))
+    with _lock:
+        report = [r for r in _state["report"] if query.lower() in r["key"].lower()]
+    return render_template("dashboard.html", **build_context(report, f'Search: "{query}"'), search_query=query)
 
 
 @app.route("/refresh", methods=["POST"])
