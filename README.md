@@ -326,13 +326,18 @@ asking a team member (usually Isaac) to assign the ticket for an estimate
 — mostly on CSSD tickets, but it can happen on IAP or ACP too, so this
 isn't restricted to one project.
 
-The rule: if a ticket's **most recent comment** is from someone in
-`ESTIMATE_REQUESTERS` (just Henry Glubb for now — add more names at the
-top of `staleness.py` if others start doing this) and that comment
-mentions "estimat..." (matches estimate/estimation/estimating), the
-ticket is flagged `[NEEDS ESTIMATE]`. Checking only the *latest* comment
-means it clears itself automatically the moment someone replies — no
-manual cleanup needed once the estimate goes out.
+The rule: `staleness.py` scans **every** comment (not just the latest,
+since the request can be several comments back with quieter discussion
+after it) for one from someone in `ESTIMATE_REQUESTERS` (just Henry Glubb
+for now — add more names at the top of `staleness.py` if others start
+doing this) that looks like a request — matching `ESTIMATE_REQUEST_PHRASES`
+("estimat...", which covers estimate/estimation/estimating, and "please
+assign," Henry's other common phrasing that doesn't contain the word
+"estimate" at all). If the most recent such request has no comment from a
+**team member** after it, the ticket is flagged `[NEEDS ESTIMATE]`. It
+clears automatically the moment a team member comments anything after the
+request — we don't try to verify the estimate actually went out, just that
+someone responded, same simplification used for Status Needs Updating.
 
 `check_staleness.py` shows these in a dedicated `### NEEDS ESTIMATE ###`
 section, with Henry's actual comment shown underneath each ticket so you

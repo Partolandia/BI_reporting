@@ -34,11 +34,14 @@ next action is on us (Team member or Internal) rather than the client --
 being red because we're waiting on the client isn't the team dropping the
 ball.
 
-And a "needs_estimate" flag: the ticket's most recent comment is from one
-of ESTIMATE_REQUESTERS (commonly Henry Glubb) and mentions an estimate --
-i.e. someone asked for one and nobody's replied yet. Checking only the
-latest comment means this clears itself automatically once a team member
-responds, same pattern as ready_to_close.
+And a "needs_estimate" flag: someone in ESTIMATE_REQUESTERS (commonly
+Henry Glubb) has, at some point, left a comment asking for an estimate
+(see ESTIMATE_REQUEST_PHRASES) -- checked across ALL of their comments,
+not just the latest, since the request can be several comments back with
+quieter discussion after it. It clears once a TEAM MEMBER has commented
+anything after that request -- we don't try to verify they actually sent
+the estimate, just that someone responded, same simplification used for
+needs_status_update.
 """
 
 from datetime import datetime, timezone
@@ -110,6 +113,13 @@ def responsible_party(status_name, assignee_name):
 # if others start requesting estimates the same way.
 ESTIMATE_REQUESTERS = ["Henry Glubb"]
 
+# Substring match (case-insensitive) against a requester's comment that
+# means "this is an estimate request." Covers estimate/estimation/
+# estimating, and "please assign" (Henry's other common phrasing, which
+# doesn't contain the word "estimate" at all). Add more phrasings here as
+# you spot requests this misses.
+ESTIMATE_REQUEST_PHRASES = ["estimat", "assign"]
+
 
 def parse_jira_datetime(value):
     """Jira timestamps look like '2026-08-11T13:52:10.254-0400'."""
@@ -175,23 +185,34 @@ def find_team_comment(comments, team_members):
     return None
 
 
-def find_estimate_request(comments, requesters):
+def find_estimate_request(comments, requesters, team_members):
     """
-    If the ticket's most recent comment is from one of `requesters` and
-    mentions an estimate, returns that comment. Otherwise returns None --
-    including when someone else has replied more recently, since that
-    means the request has already been addressed.
+    Finds the most recent comment from someone in `requesters` that looks
+    like an estimate request (see ESTIMATE_REQUEST_PHRASES), checked across
+    ALL comments -- not just the latest, since the request can be several
+    comments back. Returns None if no such request exists, OR if a team
+    member has commented anything since then (treated as "handled," same
+    simplification as needs_status_update -- we don't verify the estimate
+    actually went out, just that someone responded).
     """
-    if not comments:
-        return None
-    latest = max(comments, key=lambda c: parse_jira_datetime(c["created"]))
-    author = latest.get("author", {}).get("displayName", "")
-    if author not in requesters:
-        return None
-    text = adf_to_text(latest.get("body"))
-    if "estimat" not in text.lower():  # covers estimate/estimation/estimating
-        return None
-    return latest
+    requesters_lower = {name.lower() for name in requesters}
+    team_members_lower = {name.lower() for name in team_members}
+
+    ordered = sorted(comments, key=lambda c: parse_jira_datetime(c["created"]))
+
+    last_request = None
+    for comment in ordered:
+        author = comment.get("author", {}).get("displayName", "")
+        author_lower = author.lower()
+
+        if author_lower in requesters_lower:
+            text = adf_to_text(comment.get("body")).lower()
+            if any(phrase in text for phrase in ESTIMATE_REQUEST_PHRASES):
+                last_request = comment
+        elif last_request is not None and author_lower in team_members_lower:
+            last_request = None  # a team member replied after the request
+
+    return last_request
 
 
 def real_last_activity(issue, histories, comments):
@@ -288,7 +309,7 @@ def build_report(project_keys=None, statuses=None):
         party = responsible_party(status_name, assignee_name)
         urgent = category == "red" and party != "Client"
 
-        estimate_request = find_estimate_request(comments, ESTIMATE_REQUESTERS)
+        estimate_request = find_estimate_request(comments, ESTIMATE_REQUESTERS, jira_client.TEAM_MEMBERS)
         needs_estimate = estimate_request is not None
         estimate_request_text = adf_to_text(estimate_request.get("body")) if estimate_request else None
         estimate_request_by = estimate_request["author"]["displayName"] if estimate_request else None
