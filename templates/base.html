@@ -180,6 +180,14 @@
       {% endfor %}
     </nav>
     {% endif %}
+    {% if client_names %}
+    <nav>
+      <span class="nav-label">Client:</span>
+      {% for client in client_names %}
+        <a href="{{ url_for('client_filter', name=client) }}" class="{{ 'active' if title == client else '' }}">{{ client }}</a>
+      {% endfor %}
+    </nav>
+    {% endif %}
   </div>
   <form method="post" action="{{ url_for('refresh') }}">
     <button class="refresh" type="submit">Refresh now</button>

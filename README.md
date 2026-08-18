@@ -97,11 +97,12 @@ set `JIRA_DASHBOARD_PORT` to in `.env` — see "If the page won't load"
 below if 5050 doesn't work either). You'll see:
 
 - **Team Overview** by default, plus a tab for each of the 7 team members,
-  a `Project:` row (CSSD/PIE/ACP/IAP), and a `Quick filter:` row (currently
+  a `Project:` row (CSSD/PIE/ACP/IAP), a `Quick filter:` row (currently
   just **Waiting for Approval**, for following up with clients on tickets
-  sitting on their approval) — click any of these to filter, using the
+  sitting on their approval), and a `Client:` row (currently just
+  **Standish Management**) — click any of these to filter, using the
   already-cached data so it's instant, no new Jira pull. More quick
-  filters can be added easily — just say which status.
+  filters or clients can be added easily — just say which one.
 - **Stat tiles** for Total Tickets, Urgent, Red, Yellow, Green, Ready to
   Close, Status Needs Updating, and Needs Estimate. Total Tickets always
   reflects whichever filter is active (Team Overview, a person, or a
@@ -347,6 +348,25 @@ If you ever want to see one of these excluded statuses specifically,
 ```
 python check_staleness.py --status "Awaiting Implementation"
 ```
+
+### Client filters (dashboard only)
+
+Jira doesn't have a dedicated "client" field in this workflow — the
+client's name just shows up as text in the ticket title (e.g.
+"Standish DB - RP - ...", "StandishDB - IP - ..."). So the dashboard's
+`Client:` nav filter works by matching a keyword against the ticket
+summary instead: **Standish Management** matches any summary containing
+"standish" (case-insensitive), which covers "Standish DB", "StandishDB",
+"Standish -", etc.
+
+This lives in `CLIENT_FILTERS` at the top of `app.py`:
+```python
+CLIENT_FILTERS = {
+    "Standish Management": ["standish"],
+}
+```
+To add another client, add a line with their display name and one or more
+keywords to match on — or just tell me the client name and I'll add it.
 
 ## What's next
 

@@ -56,6 +56,16 @@ CATEGORY_LABELS = {
 # up as a clickable shortcut.
 QUICK_FILTER_STATUSES = ["Waiting for Approval"]
 
+# Client name -> keywords to match (case-insensitive, substring) against a
+# ticket's summary. Jira doesn't have a dedicated "client" field in this
+# workflow -- the client's name just shows up as text in the ticket title
+# (e.g. "Standish DB - RP - ...", "StandishDB - IP - ..."), so we match on
+# that instead. Add more clients here the same way; list multiple keywords
+# per client if their name appears in more than one form.
+CLIENT_FILTERS = {
+    "Standish Management": ["standish"],
+}
+
 app = Flask(__name__)
 
 _lock = threading.Lock()
@@ -144,6 +154,7 @@ def build_context(report, title):
         "team_members": jira_client.TEAM_MEMBERS,
         "project_keys": jira_client.PROJECT_KEYS,
         "quick_filter_statuses": QUICK_FILTER_STATUSES,
+        "client_names": list(CLIENT_FILTERS.keys()),
         "refresh_minutes": REFRESH_MINUTES,
         "jira_site_url": jira_client.SITE_URL,
     }
@@ -180,6 +191,16 @@ def status_filter(status_name):
     with _lock:
         report = [r for r in _state["report"] if r["status"] == status_name]
     return render_template("dashboard.html", **build_context(report, status_name))
+
+
+@app.route("/client/<path:name>")
+def client_filter(name):
+    keywords = CLIENT_FILTERS.get(name)
+    if keywords is None:
+        abort(404)
+    with _lock:
+        report = [r for r in _state["report"] if any(k in r["summary"].lower() for k in keywords)]
+    return render_template("dashboard.html", **build_context(report, name))
 
 
 @app.route("/refresh", methods=["POST"])
