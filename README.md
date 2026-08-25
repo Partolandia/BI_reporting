@@ -330,12 +330,15 @@ The rule: `staleness.py` scans **every** comment (not just the latest,
 since the request can be several comments back with quieter discussion
 after it) for one from someone in `ESTIMATE_REQUESTERS` (just Henry Glubb
 for now — add more names at the top of `staleness.py` if others start
-doing this) that looks like a request — matching `ESTIMATE_REQUEST_PHRASES`
-("estimat...", which covers estimate/estimation/estimating, and "please
-assign," Henry's other common phrasing that doesn't contain the word
-"estimate" at all). If the most recent such request has no comment from a
-**team member** after it, the ticket is flagged `[NEEDS ESTIMATE]`. It
-clears automatically the moment a team member comments anything after the
+doing this). This is authorship-based, not keyword-based — an earlier
+version tried to match phrases like "estimate" or "please assign," but
+real requests come in too many wordings for a phrase list to keep up
+(e.g. "please review and let's discuss the best way forward" is just as
+much a request as "please assign," with none of the same words). So the
+rule is simply: has Henry commented, and has nobody on the team replied
+since? If the most recent Henry comment has no comment from a **team
+member** after it, the ticket is flagged `[NEEDS ESTIMATE]`. It clears
+automatically the moment a team member comments anything after the
 request — we don't try to verify the estimate actually went out, just that
 someone responded, same simplification used for Status Needs Updating.
 
