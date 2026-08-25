@@ -29,7 +29,6 @@ def main():
 
     print("=" * 70)
     print(f"ESTIMATE_REQUESTERS = {s.ESTIMATE_REQUESTERS}")
-    print(f"ESTIMATE_REQUEST_PHRASES = {s.ESTIMATE_REQUEST_PHRASES}")
     print(f"TEAM_MEMBERS = {jira_client.TEAM_MEMBERS}")
     print()
 
@@ -41,8 +40,8 @@ def main():
         print("NEEDS ESTIMATE: no")
         print(
             "Reasons this could be 'no': no comment author exactly matches "
-            "ESTIMATE_REQUESTERS, no comment text matches ESTIMATE_REQUEST_PHRASES, "
-            "or a TEAM_MEMBERS comment came after the request."
+            "ESTIMATE_REQUESTERS, or a TEAM_MEMBERS comment came after their "
+            "most recent comment."
         )
 
 
