@@ -35,15 +35,22 @@ being red because we're waiting on the client isn't the team dropping the
 ball.
 
 And a "needs_estimate" flag: someone in ESTIMATE_REQUESTERS (commonly
-Henry Glubb) has commented and nobody on the team has replied since --
-checked across ALL of their comments, not just the latest, since the
-request can be several comments back with quieter discussion after it.
-This is authorship-based, not keyword-based: it doesn't try to detect
-"this comment is asking for an estimate" by its wording, because Henry
-asks in too many different ways for any phrase list to keep up. It clears
-once a TEAM MEMBER has commented anything after that request -- we don't
-try to verify they actually sent the estimate, just that someone
-responded, same simplification used for needs_status_update.
+Henry Glubb) has left a comment that looks like a new estimate/scoping
+request (see ESTIMATE_REQUEST_PHRASES), checked across ALL of their
+comments, not just the latest, since the request can be several comments
+back with quieter discussion after it. It clears once a TEAM MEMBER has
+commented anything after that request -- we don't try to verify they
+actually sent the estimate, just that someone responded, same
+simplification used for needs_status_update.
+
+This needs BOTH authorship and content, not authorship alone: requesters
+like Henry also do ongoing hands-on work on a ticket once it's past the
+estimate stage -- testing their own changes, configuring things, talking
+directly to the client -- and none of that is a new request just because
+it happens to be his most recent comment (see CSSD-6209, where the actual
+estimate request was properly handled back in May, but a later, unrelated
+comment from Henry -- "I updated X, can you test and confirm" -- kept
+re-triggering the flag under an authorship-only rule).
 """
 
 from datetime import datetime, timezone
@@ -111,10 +118,22 @@ def responsible_party(status_name, assignee_name):
     return STATUS_RESPONSIBLE_PARTY.get(status_name.lower(), "Team member")
 
 
-# People whose unanswered comments count as an outstanding estimate
-# request. Add more names here if others start requesting estimates the
-# same way.
+# People whose comments count as an estimate request when they also match
+# ESTIMATE_REQUEST_PHRASES below. Add more names here if others start
+# requesting estimates the same way.
 ESTIMATE_REQUESTERS = ["Henry Glubb"]
+
+# Substring match (case-insensitive) against a requester's comment that
+# means "this is a new estimate/scoping request" -- as opposed to routine
+# back-and-forth on a ticket that's already past that stage (testing,
+# clarifying questions, status updates). Covers estimate/estimation,
+# "assign" (Henry's other common phrasing when kicking off a request), and
+# "best way forward" (seen on a real request that used neither of those
+# words). Built from real examples, not guessed -- add more phrasings here
+# as you spot requests this misses, but keep new entries specific to
+# "asking the team to scope/estimate something new," not just anything
+# Henry might say.
+ESTIMATE_REQUEST_PHRASES = ["estimat", "assign", "best way forward"]
 
 
 def parse_jira_datetime(value):
@@ -184,21 +203,16 @@ def find_team_comment(comments, team_members):
 def find_estimate_request(comments, requesters, team_members):
     """
     Finds the most recent comment from someone in `requesters` (e.g. Henry
-    Glubb) that has had no reply from a TEAM MEMBER since. Returns None if
-    that person hasn't commented, or if a team member has replied to their
-    most recent comment already.
+    Glubb) that matches ESTIMATE_REQUEST_PHRASES and has had no reply from
+    a TEAM MEMBER since. Checked across ALL comments, not just the latest,
+    since the request can be several comments back. Returns None if no
+    such request exists, or if a team member has replied to it already.
 
-    This used to require the comment to contain specific phrases
-    ("estimate", "please assign"), but real requests come in too many
-    wordings for keyword matching to keep up -- e.g. "please review and
-    let's discuss the best way forward" is just as much a request as
-    "please assign" is, and no keyword list will catch every variant.
-    Checking *who* is waiting on a reply instead of *what they said* is
-    the same fix already applied to needs_status_update, for the same
-    reason -- and it's a safe simplification here because
-    ESTIMATE_REQUESTERS is a short, deliberately curated list of people
-    whose comments are, in practice, always something the team owes a
-    response to.
+    Requires both authorship AND content match -- authorship alone is too
+    broad, since requesters like Henry also do ongoing hands-on work on a
+    ticket once it's past the estimate stage (testing, configuring,
+    talking directly to the client), and that routine involvement isn't a
+    new request just because it happens to be his most recent comment.
     """
     requesters_lower = {name.lower() for name in requesters}
     team_members_lower = {name.lower() for name in team_members}
@@ -211,7 +225,9 @@ def find_estimate_request(comments, requesters, team_members):
         author_lower = author.lower()
 
         if author_lower in requesters_lower:
-            last_request = comment
+            text = adf_to_text(comment.get("body")).lower()
+            if any(phrase in text for phrase in ESTIMATE_REQUEST_PHRASES):
+                last_request = comment
         elif last_request is not None and author_lower in team_members_lower:
             last_request = None  # a team member replied after the request
 

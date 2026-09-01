@@ -329,18 +329,26 @@ isn't restricted to one project.
 The rule: `staleness.py` scans **every** comment (not just the latest,
 since the request can be several comments back with quieter discussion
 after it) for one from someone in `ESTIMATE_REQUESTERS` (just Henry Glubb
-for now — add more names at the top of `staleness.py` if others start
-doing this). This is authorship-based, not keyword-based — an earlier
-version tried to match phrases like "estimate" or "please assign," but
-real requests come in too many wordings for a phrase list to keep up
-(e.g. "please review and let's discuss the best way forward" is just as
-much a request as "please assign," with none of the same words). So the
-rule is simply: has Henry commented, and has nobody on the team replied
-since? If the most recent Henry comment has no comment from a **team
-member** after it, the ticket is flagged `[NEEDS ESTIMATE]`. It clears
+for now) that also matches `ESTIMATE_REQUEST_PHRASES` — "estimat...",
+"assign", or "best way forward". It needs **both** signals, not just
+authorship: Henry also does ongoing hands-on work on a ticket once it's
+past the estimate stage — testing his own changes, configuring things,
+talking directly to the client — and none of that is a new request just
+because it's his most recent comment. (An earlier version tried
+authorship alone and it correctly caught real requests, but also
+flagged tickets like CSSD-6209, where the actual estimate had long since
+been sent and approved, and Henry's later comment was just "I made this
+change, can you confirm it works" — not a request at all.)
+
+If the most recent matching comment has no comment from a **team member**
+after it, the ticket is flagged `[NEEDS ESTIMATE]`. It clears
 automatically the moment a team member comments anything after the
 request — we don't try to verify the estimate actually went out, just that
 someone responded, same simplification used for Status Needs Updating.
+This is still a plain keyword/authorship heuristic, not real
+understanding, so it can miss a genuine request phrased in a new way, or
+occasionally catch one that isn't — tell me about either kind of miss and
+I'll adjust `ESTIMATE_REQUEST_PHRASES`.
 
 `check_staleness.py` shows these in a dedicated `### NEEDS ESTIMATE ###`
 section, with Henry's actual comment shown underneath each ticket so you
