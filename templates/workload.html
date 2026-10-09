@@ -54,7 +54,7 @@
         <tr>
           <td class="key-cell"><a href="{{ jira_site_url }}/browse/{{ t.key }}" target="_blank" rel="noopener">{{ t.key }}</a></td>
           <td>{{ t.days_since_assignment }}</td>
-          <td class="party">{{ t.assigned_by or "Unknown (assigned at creation)" }}</td>
+          <td class="party">{{ t.assigned_by or "Unknown" }}</td>
           <td>
             {{ t.summary }}
             {% if t.suggest_reassignment %}<span class="tag">SUGGEST REASSIGN</span>{% endif %}

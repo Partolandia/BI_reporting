@@ -172,6 +172,17 @@ def adf_to_text(node):
     return ""
 
 
+def author_name(entry):
+    """
+    Safe accessor for a comment or changelog history entry's author display
+    name. Jira sometimes records an entry (certain automation-driven
+    changes in particular) with "author": null rather than just omitting
+    the key, so entry.get("author", {}) isn't enough -- that default only
+    kicks in when the key is missing, not when it's present but None.
+    """
+    return (entry.get("author") or {}).get("displayName", "")
+
+
 def last_status_change(histories):
     """Latest timestamp where the 'status' field actually changed, or None."""
     latest = None
@@ -200,7 +211,7 @@ def find_assignment_date(histories, assignee_name):
                 when = parse_jira_datetime(history["created"])
                 if latest is None or when > latest:
                     latest = when
-                    assigned_by = history.get("author", {}).get("displayName")
+                    assigned_by = author_name(history) or None
     return latest, assigned_by
 
 
@@ -212,12 +223,10 @@ def last_assignee_activity(histories, comments, assignee_name, after):
     assigned to them.
     """
     for history in histories:
-        author = history.get("author", {}).get("displayName", "")
-        if author == assignee_name and parse_jira_datetime(history["created"]) > after:
+        if author_name(history) == assignee_name and parse_jira_datetime(history["created"]) > after:
             return True
     for comment in comments:
-        author = comment.get("author", {}).get("displayName", "")
-        if author == assignee_name and parse_jira_datetime(comment["created"]) > after:
+        if author_name(comment) == assignee_name and parse_jira_datetime(comment["created"]) > after:
             return True
     return False
 
@@ -250,8 +259,7 @@ def find_team_comment(comments, team_members):
     """
     team_members_lower = {name.lower() for name in team_members}
     for comment in comments:
-        author = comment.get("author", {}).get("displayName", "")
-        if author.lower() in team_members_lower:
+        if author_name(comment).lower() in team_members_lower:
             return comment
     return None
 
@@ -277,8 +285,7 @@ def find_estimate_request(comments, requesters, team_members):
 
     last_request = None
     for comment in ordered:
-        author = comment.get("author", {}).get("displayName", "")
-        author_lower = author.lower()
+        author_lower = author_name(comment).lower()
 
         if author_lower in requesters_lower:
             text = adf_to_text(comment.get("body")).lower()
