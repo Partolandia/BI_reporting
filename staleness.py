@@ -51,6 +51,15 @@ it happens to be his most recent comment (see CSSD-6209, where the actual
 estimate request was properly handled back in May, but a later, unrelated
 comment from Henry -- "I updated X, can you test and confirm" -- kept
 re-triggering the flag under an authorship-only rule).
+
+Separately, build_workload_summary() looks at team workload balance: for
+each assigned ticket, when it was most recently assigned to its current
+assignee (find_assignment_date) and whether that person has done anything
+-- a comment or a field change -- on it since (last_assignee_activity).
+A ticket sitting untouched since assignment counts toward that person's
+"oversaturated" signal; their total ticket count (relative to the team
+average) drives "big queue" and "needs assignments." See
+build_workload_summary() for the exact thresholds.
 """
 
 from datetime import datetime, timezone
@@ -135,6 +144,14 @@ ESTIMATE_REQUESTERS = ["Henry Glubb"]
 # Henry might say.
 ESTIMATE_REQUEST_PHRASES = ["estimat", "assign", "best way forward"]
 
+# Team workload thresholds (see build_workload_summary()). Relative to the
+# team's own average ticket count rather than fixed numbers, since "a big
+# queue" depends on how busy the team is overall -- adjust these
+# multipliers if they flag the wrong people once you see real data.
+WORKLOAD_BIG_QUEUE_MULTIPLIER = 1.5  # total tickets >= average * this -> "Big Queue"
+WORKLOAD_LOW_MULTIPLIER = 0.5  # total tickets <= average * this -> "Needs Assignments"
+WORKLOAD_OVERSATURATED_UNTOUCHED = 3  # untouched-since-assigned count >= this -> "Oversaturated"
+
 
 def parse_jira_datetime(value):
     """Jira timestamps look like '2026-08-11T13:52:10.254-0400'."""
@@ -164,6 +181,45 @@ def last_status_change(histories):
             if latest is None or when > latest:
                 latest = when
     return latest
+
+
+def find_assignment_date(histories, assignee_name):
+    """
+    Most recent changelog entry where the 'assignee' field was changed TO
+    assignee_name. Returns (assigned_date, assigned_by) -- the history
+    entry's author, whoever that was, not necessarily a specific person --
+    or (None, None) if the ticket's changelog has no such entry (it was
+    assigned to them at creation and never reassigned since, so there's no
+    changelog record of it).
+    """
+    latest = None
+    assigned_by = None
+    for history in histories:
+        for item in history["items"]:
+            if item["field"] == "assignee" and item.get("toString") == assignee_name:
+                when = parse_jira_datetime(history["created"])
+                if latest is None or when > latest:
+                    latest = when
+                    assigned_by = history.get("author", {}).get("displayName")
+    return latest, assigned_by
+
+
+def last_assignee_activity(histories, comments, assignee_name, after):
+    """
+    True if assignee_name has done anything -- commented, or changed any
+    field -- on the ticket after the `after` timestamp. Used to tell
+    whether someone has actually started working on a ticket since it was
+    assigned to them.
+    """
+    for history in histories:
+        author = history.get("author", {}).get("displayName", "")
+        if author == assignee_name and parse_jira_datetime(history["created"]) > after:
+            return True
+    for comment in comments:
+        author = comment.get("author", {}).get("displayName", "")
+        if author == assignee_name and parse_jira_datetime(comment["created"]) > after:
+            return True
+    return False
 
 
 def last_comment_time(comments):
@@ -334,6 +390,24 @@ def build_report(project_keys=None, statuses=None):
         estimate_request_by = estimate_request["author"]["displayName"] if estimate_request else None
         estimate_request_date = estimate_request["created"] if estimate_request else None
 
+        assigned_date = None
+        assigned_by = None
+        touched_since_assignment = True
+        if assignee_name:
+            assigned_date, assigned_by = find_assignment_date(histories, assignee_name)
+            if assigned_date is None:
+                # No changelog record of an assignment -- assigned at
+                # creation and never reassigned since.
+                assigned_date = parse_jira_datetime(fields["created"])
+            touched_since_assignment = last_assignee_activity(
+                histories, comments, assignee_name, assigned_date
+            )
+        days_since_assignment = (
+            round((datetime.now(timezone.utc) - assigned_date).total_seconds() / 86400, 1)
+            if assigned_date
+            else None
+        )
+
         report.append(
             {
                 "key": issue["key"],
@@ -355,9 +429,85 @@ def build_report(project_keys=None, statuses=None):
                 "estimate_request_text": estimate_request_text,
                 "estimate_request_by": estimate_request_by,
                 "estimate_request_date": estimate_request_date,
+                "assigned_date": assigned_date,
+                "assigned_by": assigned_by,
+                "touched_since_assignment": touched_since_assignment,
+                "days_since_assignment": days_since_assignment,
             }
         )
 
     category_order = {"red": 0, "yellow": 1, "ready_to_close": 2, "green": 3}
     report.sort(key=lambda r: (category_order[r["category"]], -r["days_inactive"]))
     return report
+
+
+def build_workload_summary(report, team_members):
+    """
+    Groups a staleness report (from build_report()) by assignee and flags
+    workload-balance risks. Returns a dict:
+
+        {
+            "average": <team's average ticket count>,
+            "people": [
+                {
+                    "name": ..., "total": ..., "untouched_count": ...,
+                    "untouched_tickets": [ticket dict + "suggest_reassignment"],
+                    "flags": ["big_queue" | "oversaturated" | "needs_assignments", ...],
+                },
+                ...
+            ],
+        }
+
+    Flags (see the WORKLOAD_* constants above for the exact thresholds):
+      - "big_queue": total assigned tickets well above the team average --
+        a lot on their plate, whether or not they're keeping up with it.
+      - "oversaturated": too many tickets sitting untouched since they were
+        assigned -- the person hasn't gotten to them. Each such ticket is
+        a candidate for reassignment (suggest_reassignment=True on it).
+      - "needs_assignments": total assigned tickets well below the team
+        average -- this person has room for more work.
+
+    The average is computed only across people who have at least one
+    ticket, so one person with zero tickets doesn't drag the bar down for
+    everyone else -- they get flagged "needs_assignments" on their own.
+    """
+    by_person = {name: [] for name in team_members}
+    for row in report:
+        if row["assignee"] in by_person:
+            by_person[row["assignee"]].append(row)
+
+    totals_with_work = [len(rows) for rows in by_person.values() if rows]
+    average = sum(totals_with_work) / len(totals_with_work) if totals_with_work else 0
+
+    people = []
+    for name in team_members:
+        rows = by_person[name]
+        total = len(rows)
+        untouched = [row for row in rows if not row["touched_since_assignment"]]
+
+        flags = []
+        if average > 0 and total >= average * WORKLOAD_BIG_QUEUE_MULTIPLIER:
+            flags.append("big_queue")
+        if len(untouched) >= WORKLOAD_OVERSATURATED_UNTOUCHED:
+            flags.append("oversaturated")
+        if average > 0 and total <= average * WORKLOAD_LOW_MULTIPLIER:
+            flags.append("needs_assignments")
+
+        oversaturated = "oversaturated" in flags
+        untouched_tickets = sorted(
+            ({**row, "suggest_reassignment": oversaturated} for row in untouched),
+            key=lambda row: -(row["days_since_assignment"] or 0),
+        )
+
+        people.append(
+            {
+                "name": name,
+                "total": total,
+                "untouched_count": len(untouched),
+                "untouched_tickets": untouched_tickets,
+                "flags": flags,
+            }
+        )
+
+    people.sort(key=lambda person: -person["total"])
+    return {"average": round(average, 1), "people": people}

@@ -33,7 +33,7 @@ from dotenv import load_dotenv
 from flask import Flask, abort, redirect, render_template, request, url_for
 
 import jira_client
-from staleness import build_report
+from staleness import build_report, build_workload_summary
 
 load_dotenv()
 
@@ -117,6 +117,26 @@ def _background_loop():
         time.sleep(REFRESH_MINUTES * 60)
 
 
+def nav_context():
+    """Header/nav data shared by every page (both the staleness views and /workload)."""
+    with _lock:
+        last_refreshed = _state["last_refreshed"]
+        refreshing = _state["refreshing"]
+        error = _state["error"]
+
+    return {
+        "last_refreshed": last_refreshed,
+        "refreshing": refreshing,
+        "error": error,
+        "team_members": jira_client.TEAM_MEMBERS,
+        "project_keys": jira_client.PROJECT_KEYS,
+        "quick_filter_statuses": QUICK_FILTER_STATUSES,
+        "client_names": list(CLIENT_FILTERS.keys()),
+        "refresh_minutes": REFRESH_MINUTES,
+        "jira_site_url": jira_client.SITE_URL,
+    }
+
+
 def build_context(report, title):
     counts = {c: 0 for c in CATEGORY_ORDER}
     needs_status_update_rows = []
@@ -133,11 +153,6 @@ def build_context(report, title):
 
     groups = {c: [r for r in report if r["category"] == c] for c in CATEGORY_ORDER}
 
-    with _lock:
-        last_refreshed = _state["last_refreshed"]
-        refreshing = _state["refreshing"]
-        error = _state["error"]
-
     return {
         "title": title,
         "total": len(report),
@@ -148,15 +163,53 @@ def build_context(report, title):
         "groups": groups,
         "category_order": CATEGORY_ORDER,
         "category_labels": CATEGORY_LABELS,
-        "last_refreshed": last_refreshed,
-        "refreshing": refreshing,
-        "error": error,
-        "team_members": jira_client.TEAM_MEMBERS,
-        "project_keys": jira_client.PROJECT_KEYS,
-        "quick_filter_statuses": QUICK_FILTER_STATUSES,
-        "client_names": list(CLIENT_FILTERS.keys()),
-        "refresh_minutes": REFRESH_MINUTES,
-        "jira_site_url": jira_client.SITE_URL,
+        **nav_context(),
+    }
+
+
+# SVG geometry for the workload bar chart -- a horizontal bar per team
+# member (chosen over a pie: 7 long names compare far more clearly as
+# horizontal bars, and bar color encodes risk status rather than spending
+# 7 hues on identity that the name label already carries).
+WORKLOAD_LABEL_WIDTH = 190
+WORKLOAD_TRACK_WIDTH = 340
+WORKLOAD_ROW_HEIGHT = 34
+WORKLOAD_BAR_HEIGHT = 20
+WORKLOAD_PADDING_TOP = 14
+
+
+def build_workload_chart(people, average):
+    max_total = max((p["total"] for p in people), default=0)
+    scale = (WORKLOAD_TRACK_WIDTH / max_total) if max_total else 0
+
+    bars = []
+    for i, p in enumerate(people):
+        y = WORKLOAD_PADDING_TOP + i * WORKLOAD_ROW_HEIGHT
+        if "oversaturated" in p["flags"] or "big_queue" in p["flags"]:
+            color = "var(--critical)"
+        elif "needs_assignments" in p["flags"]:
+            color = "var(--warning)"
+        else:
+            color = "var(--good)"
+        bars.append(
+            {
+                "name": p["name"],
+                "total": p["total"],
+                "y": y,
+                "width": round(p["total"] * scale, 1),
+                "color": color,
+                "text_y": round(y + WORKLOAD_BAR_HEIGHT / 2 + 4, 1),
+            }
+        )
+
+    return {
+        "bars": bars,
+        "label_width": WORKLOAD_LABEL_WIDTH,
+        "track_width": WORKLOAD_TRACK_WIDTH,
+        "bar_height": WORKLOAD_BAR_HEIGHT,
+        "svg_width": WORKLOAD_LABEL_WIDTH + WORKLOAD_TRACK_WIDTH + 50,
+        "svg_height": WORKLOAD_PADDING_TOP + len(people) * WORKLOAD_ROW_HEIGHT + 10,
+        "avg_x": round(average * scale, 1),
     }
 
 
@@ -165,6 +218,21 @@ def dashboard():
     with _lock:
         report = list(_state["report"])
     return render_template("dashboard.html", **build_context(report, "Team Overview"))
+
+
+@app.route("/workload")
+def workload():
+    with _lock:
+        report = list(_state["report"])
+    summary = build_workload_summary(report, jira_client.TEAM_MEMBERS)
+    chart = build_workload_chart(summary["people"], summary["average"])
+    return render_template(
+        "workload.html",
+        title="Team Workload",
+        summary=summary,
+        chart=chart,
+        **nav_context(),
+    )
 
 
 @app.route("/person/<path:name>")

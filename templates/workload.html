@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 style="font-size:20px;margin:0 0 6px;font-weight:600;">Team Workload</h2>
+<p style="color:var(--text-secondary);font-size:13px;margin:0 0 20px;max-width:700px;">
+  How open tickets are spread across the team right now, and who's at risk
+  on either end — too much on their plate, or not enough assigned. Team
+  average: <strong>{{ summary.average }}</strong> tickets per person.
+</p>
+
+<div class="chart-card">
+  <svg width="{{ chart.svg_width }}" height="{{ chart.svg_height }}" viewBox="0 0 {{ chart.svg_width }} {{ chart.svg_height }}">
+    {% if chart.avg_x > 0 %}
+    <line x1="{{ chart.label_width + chart.avg_x }}" y1="0" x2="{{ chart.label_width + chart.avg_x }}" y2="{{ chart.svg_height - 4 }}"
+          stroke="var(--muted)" stroke-width="1" stroke-dasharray="3,3" />
+    <text class="muted" x="{{ chart.label_width + chart.avg_x }}" y="{{ chart.svg_height - 2 }}" text-anchor="middle">avg</text>
+    {% endif %}
+    {% for bar in chart.bars %}
+    <text x="{{ chart.label_width - 10 }}" y="{{ bar.text_y }}" text-anchor="end">{{ bar.name }}</text>
+    <rect x="{{ chart.label_width }}" y="{{ bar.y }}" width="{{ bar.width }}" height="{{ chart.bar_height }}" rx="4" fill="{{ bar.color }}">
+      <title>{{ bar.name }}: {{ bar.total }} ticket{{ 's' if bar.total != 1 else '' }}</title>
+    </rect>
+    <text x="{{ chart.label_width + bar.width + 8 }}" y="{{ bar.text_y }}">{{ bar.total }}</text>
+    {% endfor %}
+  </svg>
+  <div class="chart-legend">
+    <span><span class="swatch" style="background:var(--critical);"></span>Big queue / oversaturated</span>
+    <span><span class="swatch" style="background:var(--warning);"></span>Needs assignments</span>
+    <span><span class="swatch" style="background:var(--good);"></span>Balanced</span>
+    <span>Dashed line = team average</span>
+  </div>
+</div>
+
+{% for person in summary.people %}
+<details class="person-card">
+  <summary>
+    <span class="person-name">{{ person.name }}</span>
+    <span class="person-count">{{ person.total }} ticket{{ 's' if person.total != 1 else '' }}</span>
+    {% if person.untouched_count > 0 %}
+      <span class="person-count">· {{ person.untouched_count }} untouched since assignment</span>
+    {% endif %}
+    {% if "big_queue" in person.flags %}<span class="badge critical">BIG QUEUE</span>{% endif %}
+    {% if "oversaturated" in person.flags %}<span class="badge critical">OVERSATURATED</span>{% endif %}
+    {% if "needs_assignments" in person.flags %}<span class="badge warning">NEEDS ASSIGNMENTS</span>{% endif %}
+  </summary>
+  <div class="person-body">
+    {% if person.untouched_tickets %}
+    <div class="overflow">
+    <table>
+      <thead>
+        <tr><th>Key</th><th>Days Since Assigned</th><th>Assigned By</th><th>Summary</th></tr>
+      </thead>
+      <tbody>
+        {% for t in person.untouched_tickets %}
+        <tr>
+          <td class="key-cell"><a href="{{ jira_site_url }}/browse/{{ t.key }}" target="_blank" rel="noopener">{{ t.key }}</a></td>
+          <td>{{ t.days_since_assignment }}</td>
+          <td class="party">{{ t.assigned_by or "Unknown (assigned at creation)" }}</td>
+          <td>
+            {{ t.summary }}
+            {% if t.suggest_reassignment %}<span class="tag">SUGGEST REASSIGN</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% elif person.total > 0 %}
+    <p class="no-untouched">All of {{ person.name }}'s tickets have been touched since assignment.</p>
+    {% else %}
+    <p class="no-untouched">No tickets currently assigned.</p>
+    {% endif %}
+  </div>
+</details>
+{% endfor %}
+{% endblock %}

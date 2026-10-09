@@ -18,8 +18,8 @@ staleness logic, the web dashboard, and the Slack digest are all done.
 - `list_projects.py` — a script that lists every Jira project your account
   can see, with its real project key. Useful if you ever need to add or
   double check a project key.
-- `app.py` + `templates/` — the web dashboard. See "Running the dashboard"
-  below.
+- `app.py` + `templates/` — the web dashboard, including the Team Workload
+  page. See "Running the dashboard" and "Team Workload" below.
 - `slack_digest.py` — posts a daily summary to Slack. See "Slack digest"
   below.
 - `.env.example` — template for your credentials. Copy it to `.env` and fill
@@ -119,6 +119,9 @@ below if 5050 doesn't work either). You'll see:
   instead of terminal text.
 - Every ticket **key is a link** straight to that ticket in Jira (opens in
   a new tab).
+- A **Team Workload** page (tab next to Team Overview) showing how open
+  tickets are spread across the team, with queue-balance risk flags. See
+  "Team Workload" below for the full detail.
 
 **Why it loads instantly instead of taking minutes:** a full pull (change
 history + comments for every ticket) is slow, the same as
@@ -162,6 +165,70 @@ unrelated to this app.
    server.
 3. If the terminal shows a different error (not a port message), paste it
    back here and I'll take a look.
+
+## Team Workload
+
+A separate page (tab next to Team Overview) for balancing who has too much
+on their plate and who has room for more — open `/workload` or click
+**Team Workload** in the nav.
+
+**The chart:** a horizontal bar per team member, ticket count across. I
+built this as a bar chart rather than a literal pie — with 7 team members
+and long names ("Benjamin Sanchez Cuellar"), a pie chart's slices get hard
+to compare at a glance, and bar color can carry something more useful than
+just "whose slice is whose" (see below). Tell me if you'd still rather
+have a literal pie after seeing this and I'll swap it.
+
+Bar color is **risk status**, not identity:
+- 🔴 Red — Big Queue and/or Oversaturated (see below)
+- 🟡 Yellow — Needs Assignments
+- 🟢 Green — balanced
+
+A dashed line marks the team's average ticket count (computed only across
+people who have at least one ticket, so someone with zero doesn't drag the
+average down for everyone else).
+
+**Below the chart,** a card per team member — click to expand and see
+their untouched tickets (key linked to Jira, days since assigned, who
+assigned it, summary).
+
+### What counts as "touched"
+
+For every ticket, `staleness.py` works out:
+1. **When it was most recently assigned** to its current assignee — from
+   Jira's change history, the last time the "assignee" field changed to
+   their name. If there's no such history (assigned once, at creation,
+   and never reassigned since), it falls back to the ticket's creation
+   date.
+2. **Whether that person has done anything since** — commented, or
+   changed any field on the ticket — after that assignment date. If not,
+   the ticket counts as "untouched since assignment."
+
+This intentionally doesn't require the *assignment itself* to have been
+done by you specifically — it's whoever Jira's history shows made the
+change, shown as "Assigned By" in the drill-down so you can see at a
+glance. Tell me if you want it restricted to assignments made by Isaac
+Bernal specifically.
+
+### The three flags
+
+Computed relative to the team's own average ticket count, not fixed
+numbers — "a big queue" depends on how busy the team is overall. The
+multipliers live in `staleness.py` (`WORKLOAD_BIG_QUEUE_MULTIPLIER`,
+`WORKLOAD_LOW_MULTIPLIER`, `WORKLOAD_OVERSATURATED_UNTOUCHED`) — adjust
+them if they flag the wrong people once you see real data:
+
+- **Big Queue** — total assigned tickets ≥ 1.5× the team average. A lot on
+  their plate, whether or not they're keeping up with it.
+- **Oversaturated** — 3 or more tickets sitting untouched since
+  assignment. They haven't gotten to them yet. Every one of those tickets
+  is tagged `SUGGEST REASSIGN` in the drill-down — a candidate to move to
+  someone else, since this person already isn't keeping pace.
+- **Needs Assignments** — total assigned tickets ≤ 0.5× the team average
+  (including literally zero). Room for more work.
+
+A person can carry more than one flag — someone with a genuinely huge,
+neglected queue shows both Big Queue and Oversaturated.
 
 ## Slack digest
 
