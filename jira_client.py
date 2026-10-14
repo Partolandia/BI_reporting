@@ -11,9 +11,13 @@ a nextPageToken instead of an offset.
 """
 
 import os
+import time
 
 import requests
 from dotenv import load_dotenv
+from requests.adapters import HTTPAdapter
+from requests.exceptions import ConnectionError, ReadTimeout, SSLError, Timeout
+from urllib3.util.retry import Retry
 
 load_dotenv()
 
@@ -51,6 +55,49 @@ def _auth():
     return (EMAIL, API_TOKEN)
 
 
+# Jira pulls hit many sequential HTTPS calls; transient SSL EOF / reset errors
+# are common on Windows. Retry with backoff and avoid long-lived pooled sockets.
+_REQUEST_ATTEMPTS = 5
+_REQUEST_BACKOFF_SECONDS = 1.5
+_RETRYABLE_ERRORS = (SSLError, ConnectionError, ReadTimeout, Timeout)
+
+_SESSION = requests.Session()
+_SESSION.auth = _auth()
+_SESSION.headers["Connection"] = "close"
+_RETRY = Retry(
+    total=3,
+    connect=3,
+    read=3,
+    backoff_factor=0.8,
+    status_forcelist=(429, 500, 502, 503, 504),
+    allowed_methods=frozenset(["GET", "POST"]),
+    raise_on_status=False,
+)
+_SESSION.mount("https://", HTTPAdapter(max_retries=_RETRY))
+
+
+def _request(method, url, **kwargs):
+    kwargs.setdefault("timeout", 45)
+    last_error = None
+    for attempt in range(_REQUEST_ATTEMPTS):
+        try:
+            response = _SESSION.request(method, url, **kwargs)
+            if response.status_code == 429:
+                wait = int(response.headers.get("Retry-After", 5))
+                time.sleep(min(wait, 60))
+                continue
+            response.raise_for_status()
+            return response
+        except _RETRYABLE_ERRORS as exc:
+            last_error = exc
+            if attempt >= _REQUEST_ATTEMPTS - 1:
+                raise
+            time.sleep(_REQUEST_BACKOFF_SECONDS ** attempt)
+    if last_error:
+        raise last_error
+    raise RuntimeError(f"Jira request failed after {_REQUEST_ATTEMPTS} attempts: {url}")
+
+
 def get_tickets(project_keys=None, extra_jql=None, page_size=100):
     """
     Pull all tickets for the given project keys (defaults to PROJECT_KEYS).
@@ -80,7 +127,7 @@ def get_tickets(project_keys=None, extra_jql=None, page_size=100):
         if next_page_token:
             body["nextPageToken"] = next_page_token
 
-        response = requests.post(SEARCH_URL, auth=_auth(), json=body, timeout=30)
+        response = _request("POST", SEARCH_URL, json=body)
         response.raise_for_status()
         data = response.json()
 
@@ -106,11 +153,10 @@ def get_changelog(issue_key):
     start_at = 0
 
     while True:
-        response = requests.get(
+        response = _request(
+            "GET",
             url,
-            auth=_auth(),
             params={"startAt": start_at, "maxResults": 100},
-            timeout=30,
         )
         response.raise_for_status()
         data = response.json()
@@ -136,11 +182,10 @@ def get_comments(issue_key):
     start_at = 0
 
     while True:
-        response = requests.get(
+        response = _request(
+            "GET",
             url,
-            auth=_auth(),
             params={"startAt": start_at, "maxResults": 100},
-            timeout=30,
         )
         response.raise_for_status()
         data = response.json()
