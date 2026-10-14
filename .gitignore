@@ -5,3 +5,4 @@ venv/
 .venv/
 *.log
 dashboard_cache.json
+.dashboard_refresh.lock

@@ -40,6 +40,7 @@ load_dotenv()
 REFRESH_MINUTES = int(os.environ.get("JIRA_REFRESH_MINUTES", "30"))
 PORT = int(os.environ.get("JIRA_DASHBOARD_PORT", "5050"))
 CACHE_FILE = Path(__file__).parent / "dashboard_cache.json"
+REFRESH_LOCK_FILE = Path(__file__).parent / ".dashboard_refresh.lock"
 
 CATEGORY_ORDER = ["red", "yellow", "ready_to_close", "green"]
 CATEGORY_LABELS = {
@@ -69,7 +70,13 @@ CLIENT_FILTERS = {
 app = Flask(__name__)
 
 _lock = threading.Lock()
-_state = {"report": [], "last_refreshed": None, "refreshing": False, "error": None}
+_state = {
+    "report": [],
+    "last_refreshed": None,
+    "refreshing": False,
+    "error": None,
+    "warning": None,
+}
 
 
 def _load_cache_from_disk():
@@ -93,28 +100,85 @@ def _save_cache_to_disk():
     CACHE_FILE.write_text(json.dumps(payload, default=str))
 
 
+def _pid_is_alive(pid):
+    if pid <= 0:
+        return False
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _try_acquire_refresh_lock():
+    """Only one dashboard process should pull Jira at a time."""
+    if REFRESH_LOCK_FILE.exists():
+        try:
+            other_pid = int(REFRESH_LOCK_FILE.read_text().strip())
+            if other_pid != os.getpid() and _pid_is_alive(other_pid):
+                return False
+        except (ValueError, OSError):
+            pass
+    try:
+        REFRESH_LOCK_FILE.write_text(str(os.getpid()))
+        return True
+    except OSError:
+        return False
+
+
+def _release_refresh_lock():
+    try:
+        if REFRESH_LOCK_FILE.exists() and REFRESH_LOCK_FILE.read_text().strip() == str(os.getpid()):
+            REFRESH_LOCK_FILE.unlink()
+    except OSError:
+        pass
+
+
 def refresh_now():
     with _lock:
         if _state["refreshing"]:
             return
         _state["refreshing"] = True
 
+    if not _try_acquire_refresh_lock():
+        with _lock:
+            _state["refreshing"] = False
+        return
+
     try:
-        report = build_report()
+        warnings = []
+        report = build_report(warnings=warnings)
+        degraded = sum(1 for row in report if row.get("fetch_degraded"))
         with _lock:
             _state["report"] = report
             _state["last_refreshed"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
             _state["error"] = None
+            if degraded:
+                _state["warning"] = (
+                    f"Refresh completed, but {degraded} ticket(s) used limited data "
+                    f"because Jira connection errors persisted after retries."
+                )
+            else:
+                _state["warning"] = None
         _save_cache_to_disk()
     except Exception as exc:
         with _lock:
             _state["error"] = str(exc)
     finally:
+        _release_refresh_lock()
         with _lock:
             _state["refreshing"] = False
 
 
 def _background_loop():
+    # Avoid hammering Jira the instant the server starts (and racing a manual refresh).
+    time.sleep(20)
     while True:
         refresh_now()
         time.sleep(REFRESH_MINUTES * 60)
@@ -126,11 +190,13 @@ def nav_context():
         last_refreshed = _state["last_refreshed"]
         refreshing = _state["refreshing"]
         error = _state["error"]
+        warning = _state["warning"]
 
     return {
         "last_refreshed": last_refreshed,
         "refreshing": refreshing,
         "error": error,
+        "warning": warning,
         "team_members": jira_client.TEAM_MEMBERS,
         "project_keys": jira_client.PROJECT_KEYS,
         "quick_filter_statuses": QUICK_FILTER_STATUSES,

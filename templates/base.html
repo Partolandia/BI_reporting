@@ -101,6 +101,7 @@
     color: var(--text-secondary);
   }
   .banner.error { border-left-color: var(--critical); color: var(--critical); }
+  .banner.warning { border-left-color: var(--warning); color: var(--warning); }
   .stat-tiles {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -280,6 +281,8 @@
 <main>
   {% if error %}
     <div class="banner error">Last refresh failed: {{ error }}</div>
+  {% elif warning %}
+    <div class="banner warning">{{ warning }}</div>
   {% endif %}
   {% block content %}{% endblock %}
 </main>

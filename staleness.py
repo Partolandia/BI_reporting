@@ -63,6 +63,7 @@ build_workload_summary() for the exact thresholds.
 """
 
 import re
+import time
 from datetime import datetime, timezone
 
 import jira_client
@@ -378,7 +379,127 @@ def staleness_level(last_activity, now=None):
     return "green", days
 
 
-def build_report(project_keys=None, statuses=None):
+_TICKET_FETCH_ATTEMPTS = 4
+
+
+def _report_row_from_issue(issue, histories, comments):
+    last_activity = real_last_activity(issue, histories, comments)
+    level, days = staleness_level(last_activity)
+
+    comment_text = latest_comment_text(comments)
+    ready_to_close = looks_like_closure_signal(comment_text)
+    category = "ready_to_close" if ready_to_close else level
+
+    fields = issue["fields"]
+    status_name = fields["status"]["name"]
+
+    team_comment = None
+    if status_name == "Open":
+        team_comment = find_team_comment(comments, jira_client.TEAM_MEMBERS)
+    needs_status_update = team_comment is not None
+    progress_comment = adf_to_text(team_comment.get("body")) if team_comment else None
+    progress_comment_author = team_comment["author"]["displayName"] if team_comment else None
+    progress_comment_date = team_comment["created"] if team_comment else None
+
+    assignee = fields.get("assignee")
+    assignee_name = assignee["displayName"] if assignee else None
+    party = responsible_party(status_name, assignee_name)
+    urgent = category == "red" and party != "Client"
+
+    estimate_request = find_estimate_request(comments, ESTIMATE_REQUESTERS, jira_client.TEAM_MEMBERS)
+    needs_estimate = estimate_request is not None
+    estimate_request_text = adf_to_text(estimate_request.get("body")) if estimate_request else None
+    estimate_request_by = estimate_request["author"]["displayName"] if estimate_request else None
+    estimate_request_date = estimate_request["created"] if estimate_request else None
+
+    assigned_date = None
+    assigned_by = None
+    touched_since_assignment = True
+    if assignee_name:
+        assigned_date, assigned_by = find_assignment_date(histories, assignee_name)
+        if assigned_date is None:
+            assigned_date = parse_jira_datetime(fields["created"])
+        touched_since_assignment = last_assignee_activity(
+            histories, comments, assignee_name, assigned_date
+        )
+    days_since_assignment = (
+        round((datetime.now(timezone.utc) - assigned_date).total_seconds() / 86400, 1)
+        if assigned_date
+        else None
+    )
+
+    return {
+        "key": issue["key"],
+        "issue_type": fields["issuetype"]["name"],
+        "summary": fields["summary"],
+        "status": status_name,
+        "assignee": assignee_name or "Unassigned",
+        "last_real_activity": last_activity,
+        "days_inactive": round(days, 1),
+        "level": level,
+        "category": category,
+        "latest_comment": comment_text,
+        "needs_status_update": needs_status_update,
+        "progress_comment": progress_comment,
+        "progress_comment_author": progress_comment_author,
+        "progress_comment_date": progress_comment_date,
+        "responsible_party": party,
+        "urgent": urgent,
+        "needs_estimate": needs_estimate,
+        "estimate_request_text": estimate_request_text,
+        "estimate_request_by": estimate_request_by,
+        "estimate_request_date": estimate_request_date,
+        "assigned_date": assigned_date,
+        "assigned_by": assigned_by,
+        "touched_since_assignment": touched_since_assignment,
+        "days_since_assignment": days_since_assignment,
+        "fetch_degraded": False,
+    }
+
+
+def _degraded_report_row(issue):
+    """
+    Fallback when changelog/comments cannot be fetched (e.g. transient SSL).
+    Uses Jira's generic updated timestamp so the refresh can still complete.
+    """
+    fields = issue["fields"]
+    status_name = fields["status"]["name"]
+    assignee = fields.get("assignee")
+    assignee_name = assignee["displayName"] if assignee else None
+    last_activity = parse_jira_datetime(fields["updated"])
+    level, days = staleness_level(last_activity)
+    party = responsible_party(status_name, assignee_name)
+
+    return {
+        "key": issue["key"],
+        "issue_type": fields["issuetype"]["name"],
+        "summary": fields["summary"],
+        "status": status_name,
+        "assignee": assignee_name or "Unassigned",
+        "last_real_activity": last_activity,
+        "days_inactive": round(days, 1),
+        "level": level,
+        "category": level,
+        "latest_comment": "",
+        "needs_status_update": False,
+        "progress_comment": None,
+        "progress_comment_author": None,
+        "progress_comment_date": None,
+        "responsible_party": party,
+        "urgent": level == "red" and party != "Client",
+        "needs_estimate": False,
+        "estimate_request_text": None,
+        "estimate_request_by": None,
+        "estimate_request_date": None,
+        "assigned_date": None,
+        "assigned_by": None,
+        "touched_since_assignment": True,
+        "days_since_assignment": None,
+        "fetch_degraded": True,
+    }
+
+
+def build_report(project_keys=None, statuses=None, warnings=None):
     """
     Pulls every open (not-Done) ticket for the tracked team/projects, works
     out each one's real last-activity date, and classifies it. Returns a
@@ -414,84 +535,23 @@ def build_report(project_keys=None, statuses=None):
 
     report = []
     for issue in issues:
-        histories = jira_client.get_changelog(issue["key"])
-        comments = jira_client.get_comments(issue["key"])
-
-        last_activity = real_last_activity(issue, histories, comments)
-        level, days = staleness_level(last_activity)
-
-        comment_text = latest_comment_text(comments)
-        ready_to_close = looks_like_closure_signal(comment_text)
-        category = "ready_to_close" if ready_to_close else level
-
-        fields = issue["fields"]
-        status_name = fields["status"]["name"]
-
-        team_comment = None
-        if status_name == "Open":
-            team_comment = find_team_comment(comments, jira_client.TEAM_MEMBERS)
-        needs_status_update = team_comment is not None
-        progress_comment = adf_to_text(team_comment.get("body")) if team_comment else None
-        progress_comment_author = team_comment["author"]["displayName"] if team_comment else None
-        progress_comment_date = team_comment["created"] if team_comment else None
-
-        assignee = fields.get("assignee")
-        assignee_name = assignee["displayName"] if assignee else None
-        party = responsible_party(status_name, assignee_name)
-        urgent = category == "red" and party != "Client"
-
-        estimate_request = find_estimate_request(comments, ESTIMATE_REQUESTERS, jira_client.TEAM_MEMBERS)
-        needs_estimate = estimate_request is not None
-        estimate_request_text = adf_to_text(estimate_request.get("body")) if estimate_request else None
-        estimate_request_by = estimate_request["author"]["displayName"] if estimate_request else None
-        estimate_request_date = estimate_request["created"] if estimate_request else None
-
-        assigned_date = None
-        assigned_by = None
-        touched_since_assignment = True
-        if assignee_name:
-            assigned_date, assigned_by = find_assignment_date(histories, assignee_name)
-            if assigned_date is None:
-                # No changelog record of an assignment -- assigned at
-                # creation and never reassigned since.
-                assigned_date = parse_jira_datetime(fields["created"])
-            touched_since_assignment = last_assignee_activity(
-                histories, comments, assignee_name, assigned_date
-            )
-        days_since_assignment = (
-            round((datetime.now(timezone.utc) - assigned_date).total_seconds() / 86400, 1)
-            if assigned_date
-            else None
-        )
-
-        report.append(
-            {
-                "key": issue["key"],
-                "issue_type": fields["issuetype"]["name"],
-                "summary": fields["summary"],
-                "status": status_name,
-                "assignee": assignee_name or "Unassigned",
-                "last_real_activity": last_activity,
-                "days_inactive": round(days, 1),
-                "level": level,
-                "category": category,
-                "latest_comment": comment_text,
-                "needs_status_update": needs_status_update,
-                "progress_comment": progress_comment,
-                "progress_comment_author": progress_comment_author,
-                "progress_comment_date": progress_comment_date,
-                "responsible_party": party,
-                "urgent": urgent,
-                "needs_estimate": needs_estimate,
-                "estimate_request_text": estimate_request_text,
-                "estimate_request_by": estimate_request_by,
-                "estimate_request_date": estimate_request_date,
-                "assigned_date": assigned_date,
-                "assigned_by": assigned_by,
-                "touched_since_assignment": touched_since_assignment,
-                "days_since_assignment": days_since_assignment,
-            }
-        )
+        row = None
+        last_error = None
+        for attempt in range(_TICKET_FETCH_ATTEMPTS):
+            try:
+                histories = jira_client.get_changelog(issue["key"])
+                comments = jira_client.get_comments(issue["key"])
+                row = _report_row_from_issue(issue, histories, comments)
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt < _TICKET_FETCH_ATTEMPTS - 1:
+                    time.sleep(2.0 * (attempt + 1))
+        if row is None:
+            row = _degraded_report_row(issue)
+            if warnings is not None:
+                warnings.append(f"{issue['key']}: {last_error}")
+        report.append(row)
 
     category_order = {"red": 0, "yellow": 1, "ready_to_close": 2, "green": 3}
     report.sort(key=lambda r: (category_order[r["category"]], -r["days_inactive"]))

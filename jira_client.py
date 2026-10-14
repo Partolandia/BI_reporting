@@ -16,8 +16,7 @@ import time
 import requests
 from dotenv import load_dotenv
 from requests.adapters import HTTPAdapter
-from requests.exceptions import ConnectionError, ReadTimeout, SSLError, Timeout
-from urllib3.util.retry import Retry
+from requests.exceptions import ChunkedEncodingError, ConnectionError, ReadTimeout, SSLError, Timeout
 
 load_dotenv()
 
@@ -56,43 +55,38 @@ def _auth():
 
 
 # Jira pulls hit many sequential HTTPS calls; transient SSL EOF / reset errors
-# are common on Windows. Retry with backoff and avoid long-lived pooled sockets.
-_REQUEST_ATTEMPTS = 5
-_REQUEST_BACKOFF_SECONDS = 1.5
-_RETRYABLE_ERRORS = (SSLError, ConnectionError, ReadTimeout, Timeout)
-
-_SESSION = requests.Session()
-_SESSION.auth = _auth()
-_SESSION.headers["Connection"] = "close"
-_RETRY = Retry(
-    total=3,
-    connect=3,
-    read=3,
-    backoff_factor=0.8,
-    status_forcelist=(429, 500, 502, 503, 504),
-    allowed_methods=frozenset(["GET", "POST"]),
-    raise_on_status=False,
-)
-_SESSION.mount("https://", HTTPAdapter(max_retries=_RETRY))
+# are common on Windows (especially after hundreds of calls on one connection).
+_REQUEST_ATTEMPTS = 8
+_REQUEST_BACKOFF_SECONDS = 2.0
+_INTER_REQUEST_DELAY_SECONDS = 0.05
+_RETRYABLE_ERRORS = (SSLError, ConnectionError, ReadTimeout, Timeout, ChunkedEncodingError)
 
 
 def _request(method, url, **kwargs):
-    kwargs.setdefault("timeout", 45)
+    kwargs.setdefault("timeout", 60)
     last_error = None
     for attempt in range(_REQUEST_ATTEMPTS):
+        session = requests.Session()
+        session.auth = _auth()
+        session.headers["Connection"] = "close"
+        adapter = HTTPAdapter(pool_connections=1, pool_maxsize=1, max_retries=0)
+        session.mount("https://", adapter)
         try:
-            response = _SESSION.request(method, url, **kwargs)
+            response = session.request(method, url, **kwargs)
             if response.status_code == 429:
                 wait = int(response.headers.get("Retry-After", 5))
                 time.sleep(min(wait, 60))
                 continue
             response.raise_for_status()
+            time.sleep(_INTER_REQUEST_DELAY_SECONDS)
             return response
         except _RETRYABLE_ERRORS as exc:
             last_error = exc
             if attempt >= _REQUEST_ATTEMPTS - 1:
                 raise
             time.sleep(_REQUEST_BACKOFF_SECONDS ** attempt)
+        finally:
+            session.close()
     if last_error:
         raise last_error
     raise RuntimeError(f"Jira request failed after {_REQUEST_ATTEMPTS} attempts: {url}")
