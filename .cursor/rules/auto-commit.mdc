@@ -1,0 +1,13 @@
+---
+description: Commit completed work without asking the user first
+alwaysApply: true
+---
+
+# Auto-commit
+
+After finishing a coherent unit of work (feature, fix, or refactor), create a git commit immediately. Do not wait for the user to ask.
+
+- Commit only project source changes; never commit `.env`, credentials, or secrets.
+- Use concise commit messages in the repo's existing style (imperative, focused on why).
+- Do not push to remote unless the user asks or the task explicitly requires it.
+- If there is nothing to commit, skip silently.
