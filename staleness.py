@@ -152,6 +152,23 @@ WORKLOAD_BIG_QUEUE_MULTIPLIER = 1.5  # total tickets >= average * this -> "Big Q
 WORKLOAD_LOW_MULTIPLIER = 0.5  # total tickets <= average * this -> "Needs Assignments"
 WORKLOAD_OVERSATURATED_UNTOUCHED = 3  # untouched-since-assigned count >= this -> "Oversaturated"
 
+# Issue types excluded from Team Workload only (staleness views still include them).
+WORKLOAD_EXCLUDED_ISSUE_TYPES_BY_PROJECT = {
+    "IAP": {"Change Request"},
+}
+
+
+def exclude_from_workload(row):
+    """True if this ticket should not count toward /workload balances."""
+    project = row["key"].split("-", 1)[0]
+    excluded_types = WORKLOAD_EXCLUDED_ISSUE_TYPES_BY_PROJECT.get(project)
+    if not excluded_types:
+        return False
+    issue_type = row.get("issue_type")
+    if not issue_type:
+        return False
+    return issue_type in excluded_types
+
 
 def parse_jira_datetime(value):
     """Jira timestamps look like '2026-08-11T13:52:10.254-0400'."""
@@ -418,6 +435,7 @@ def build_report(project_keys=None, statuses=None):
         report.append(
             {
                 "key": issue["key"],
+                "issue_type": fields["issuetype"]["name"],
                 "summary": fields["summary"],
                 "status": status_name,
                 "assignee": assignee_name or "Unassigned",
@@ -477,9 +495,14 @@ def build_workload_summary(report, team_members):
     The average is computed only across people who have at least one
     ticket, so one person with zero tickets doesn't drag the bar down for
     everyone else -- they get flagged "needs_assignments" on their own.
+
+    Tickets matching WORKLOAD_EXCLUDED_ISSUE_TYPES_BY_PROJECT (e.g. IAP
+    Change Request) are omitted here but still appear on staleness views.
     """
     by_person = {name: [] for name in team_members}
     for row in report:
+        if exclude_from_workload(row):
+            continue
         if row["assignee"] in by_person:
             by_person[row["assignee"]].append(row)
 
