@@ -62,6 +62,7 @@ average) drives "big queue" and "needs assignments." See
 build_workload_summary() for the exact thresholds.
 """
 
+import re
 from datetime import datetime, timezone
 
 import jira_client
@@ -157,6 +158,36 @@ WORKLOAD_EXCLUDED_ISSUE_TYPES_BY_PROJECT = {
     "IAP": {"Change Request"},
 }
 
+# Cached reports saved before issue_type was added won't have the field until
+# the next Jira refresh. IAP Change Requests usually include the phrase in the
+# summary (e.g. "Business Intelligence - Change Request - ...").
+_IAP_CHANGE_REQUEST_SUMMARY = re.compile(r"\bchange request\b", re.IGNORECASE)
+
+
+def _infer_issue_type(row):
+    """Best-effort issue type for legacy cache rows missing issuetype.name."""
+    project = row["key"].split("-", 1)[0]
+    if project == "IAP" and _IAP_CHANGE_REQUEST_SUMMARY.search(row.get("summary") or ""):
+        return "Change Request"
+    return None
+
+
+def backfill_issue_types(report):
+    """Fill issue_type on in-memory rows when we can infer it. Returns True if any row changed."""
+    changed = False
+    for row in report:
+        if row.get("issue_type"):
+            continue
+        inferred = _infer_issue_type(row)
+        if inferred:
+            row["issue_type"] = inferred
+            changed = True
+    return changed
+
+
+def _issue_type_for_workload(row):
+    return row.get("issue_type") or _infer_issue_type(row)
+
 
 def exclude_from_workload(row):
     """True if this ticket should not count toward /workload balances."""
@@ -164,10 +195,11 @@ def exclude_from_workload(row):
     excluded_types = WORKLOAD_EXCLUDED_ISSUE_TYPES_BY_PROJECT.get(project)
     if not excluded_types:
         return False
-    issue_type = row.get("issue_type")
+    issue_type = _issue_type_for_workload(row)
     if not issue_type:
         return False
-    return issue_type in excluded_types
+    excluded_lower = {t.lower() for t in excluded_types}
+    return issue_type.lower() in excluded_lower
 
 
 def parse_jira_datetime(value):
@@ -499,6 +531,7 @@ def build_workload_summary(report, team_members):
     Tickets matching WORKLOAD_EXCLUDED_ISSUE_TYPES_BY_PROJECT (e.g. IAP
     Change Request) are omitted here but still appear on staleness views.
     """
+    backfill_issue_types(report)
     by_person = {name: [] for name in team_members}
     for row in report:
         if exclude_from_workload(row):

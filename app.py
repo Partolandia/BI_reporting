@@ -33,7 +33,7 @@ from dotenv import load_dotenv
 from flask import Flask, abort, redirect, render_template, request, url_for
 
 import jira_client
-from staleness import build_report, build_workload_summary
+from staleness import backfill_issue_types, build_report, build_workload_summary
 
 load_dotenv()
 
@@ -82,6 +82,9 @@ def _load_cache_from_disk():
     with _lock:
         _state["report"] = data["report"]
         _state["last_refreshed"] = data["last_refreshed"]
+        cache_updated = backfill_issue_types(_state["report"])
+    if cache_updated:
+        _save_cache_to_disk()
 
 
 def _save_cache_to_disk():
