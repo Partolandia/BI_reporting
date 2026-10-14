@@ -155,8 +155,10 @@ WORKLOAD_LOW_MULTIPLIER = 0.5  # total tickets <= average * this -> "Needs Assig
 WORKLOAD_OVERSATURATED_UNTOUCHED = 3  # untouched-since-assigned count >= this -> "Oversaturated"
 
 # Issue types excluded from Team Workload only (staleness views still include them).
+# IAP "change requests" use issuetype "[System] Change" in Jira; older caches
+# inferred "Change Request" from the summary text.
 WORKLOAD_EXCLUDED_ISSUE_TYPES_BY_PROJECT = {
-    "IAP": {"Change Request"},
+    "IAP": {"Change Request", "[System] Change"},
 }
 
 # Cached reports saved before issue_type was added won't have the field until
