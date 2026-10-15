@@ -38,6 +38,12 @@ SEARCH_URL = f"{SITE_URL}/rest/api/3/search/jql"
 # label. Comments are NOT fetched here -- the search endpoint's embedded
 # "comment" field doesn't reliably return full comment data, so we pull
 # comments separately per ticket via get_comments() instead.
+#
+# project, timetracking, timeoriginalestimate and timeestimate are here for
+# the workload classifier: it keys off project/issue-type metadata rather
+# than an issue-key prefix, and uses a populated remaining estimate as its
+# first effort source. Requesting them costs nothing extra -- they ride along
+# on the same search response.
 FIELDS = [
     "summary",
     "status",
@@ -47,6 +53,10 @@ FIELDS = [
     "priority",
     "created",
     "updated",
+    "project",
+    "timetracking",
+    "timeoriginalestimate",
+    "timeestimate",
 ]
 
 

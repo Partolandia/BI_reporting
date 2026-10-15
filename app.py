@@ -33,7 +33,13 @@ from dotenv import load_dotenv
 from flask import Flask, abort, redirect, render_template, request, url_for
 
 import jira_client
-from staleness import backfill_issue_types, build_report, build_workload_summary
+import workload
+from staleness import (
+    WORKLOAD_OVERRIDES_PATH,
+    WORKLOAD_POLICY_PATH,
+    backfill_issue_types,
+    build_report,
+)
 
 load_dotenv()
 
@@ -41,6 +47,24 @@ REFRESH_MINUTES = int(os.environ.get("JIRA_REFRESH_MINUTES", "30"))
 PORT = int(os.environ.get("JIRA_DASHBOARD_PORT", "5050"))
 CACHE_FILE = Path(__file__).parent / "dashboard_cache.json"
 REFRESH_LOCK_FILE = Path(__file__).parent / ".dashboard_refresh.lock"
+
+# Bumped when the cached row shape changes. An older cache still renders:
+# rows without workload source data show up as "Needs review" with an
+# explanation instead of being silently dropped or counted as zero.
+CACHE_VERSION = 2
+
+# Workload drill-down tabs. Waiting views exist so follow-up work can happen
+# without those tickets contaminating active assignment evaluation.
+WORKLOAD_VIEWS = [
+    ("active", "Active"),
+    ("waiting_client", "Waiting on client"),
+    ("waiting_other", "Waiting on others"),
+    ("review", "Needs review"),
+    ("all", "All owned"),
+    ("excluded", "Excluded"),
+]
+
+_policy_store = workload.PolicyStore(WORKLOAD_POLICY_PATH, WORKLOAD_OVERRIDES_PATH)
 
 CATEGORY_ORDER = ["red", "yellow", "ready_to_close", "green"]
 CATEGORY_LABELS = {
@@ -76,6 +100,8 @@ _state = {
     "refreshing": False,
     "error": None,
     "warning": None,
+    "cache_version": None,
+    "workload_identity_issues": [],
 }
 
 
@@ -83,21 +109,56 @@ def _load_cache_from_disk():
     if not CACHE_FILE.exists():
         return
     try:
-        data = json.loads(CACHE_FILE.read_text())
+        data = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
     except Exception:
         return  # corrupt/old cache file -- ignore, the next refresh replaces it
     with _lock:
         _state["report"] = data["report"]
         _state["last_refreshed"] = data["last_refreshed"]
+        _state["cache_version"] = data.get("cache_version")
         cache_updated = backfill_issue_types(_state["report"])
+    _reclassify_workload()
     if cache_updated:
         _save_cache_to_disk()
 
 
 def _save_cache_to_disk():
+    """Atomic write: a crash mid-write must not leave a truncated cache."""
     with _lock:
-        payload = {"report": _state["report"], "last_refreshed": _state["last_refreshed"]}
-    CACHE_FILE.write_text(json.dumps(payload, default=str))
+        payload = {
+            "cache_version": CACHE_VERSION,
+            "policy_version": _policy_store.policy.get("policy_version"),
+            "classifier_version": workload.CLASSIFIER_VERSION,
+            "report": _state["report"],
+            "last_refreshed": _state["last_refreshed"],
+        }
+    temp = CACHE_FILE.with_suffix(".json.tmp")
+    temp.write_text(json.dumps(payload, default=str), encoding="utf-8")
+    temp.replace(CACHE_FILE)
+
+
+def _reclassify_workload(now=None):
+    """
+    Recompute workload classification from the cached source records.
+
+    Runs on cache load, on policy/override change, and after every refresh so
+    time-dependent attention thresholds stay current even when no ticket
+    content changed. Never calls Jira.
+    """
+    policy = _policy_store.policy
+    overrides = _policy_store.overrides
+    with _lock:
+        report = _state["report"]
+        if not report:
+            return
+        sources = [row.get("workload_source") for row in report]
+        identity = workload.identity_from_sources(
+            sources, jira_client.TEAM_MEMBERS, policy
+        )
+        workload.reclassify_report(
+            report, policy, identity, overrides=overrides, now=now
+        )
+        _state["workload_identity_issues"] = list(identity.setup_issues)
 
 
 def _pid_is_alive(pid):
@@ -152,11 +213,17 @@ def refresh_now():
         return
 
     try:
+        _policy_store.reload_if_changed()
         warnings = []
-        report = build_report(warnings=warnings)
+        report = build_report(
+            warnings=warnings,
+            workload_policy=_policy_store.policy,
+            workload_overrides=_policy_store.overrides,
+        )
         degraded = sum(1 for row in report if row.get("fetch_degraded"))
         with _lock:
             _state["report"] = report
+            _state["cache_version"] = CACHE_VERSION
             _state["last_refreshed"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
             _state["error"] = None
             if degraded:
@@ -191,6 +258,7 @@ def nav_context():
         refreshing = _state["refreshing"]
         error = _state["error"]
         warning = _state["warning"]
+        cache_version = _state.get("cache_version")
 
     return {
         "last_refreshed": last_refreshed,
@@ -203,6 +271,7 @@ def nav_context():
         "client_names": list(CLIENT_FILTERS.keys()),
         "refresh_minutes": REFRESH_MINUTES,
         "jira_site_url": jira_client.SITE_URL,
+        "cache_stale": cache_version not in (None, CACHE_VERSION),
     }
 
 
@@ -246,27 +315,60 @@ WORKLOAD_ROW_HEIGHT = 34
 WORKLOAD_BAR_HEIGHT = 20
 WORKLOAD_PADDING_TOP = 14
 
+# Bar colour encodes configured-capacity status, not identity. Uncalibrated
+# capacity is deliberately neutral rather than green: "we don't know" must not
+# read as "available for more work".
+_CAPACITY_COLORS = {
+    "above_capacity": "var(--critical)",
+    "at_or_near_capacity": "var(--warning)",
+    "possible_capacity_for_more": "var(--good)",
+    "below_capacity_unconfirmed": "var(--info)",
+    "capacity_not_calibrated": "var(--info)",
+    "unavailable": "var(--muted)",
+}
 
-def build_workload_chart(people, average):
-    max_total = max((p["total"] for p in people), default=0)
-    scale = (WORKLOAD_TRACK_WIDTH / max_total) if max_total else 0
+
+def build_workload_chart(people):
+    """
+    Bars are planning units, split into confirmed active and provisional
+    (needs-review) segments. Waiting tickets contribute zero, so they never
+    lengthen a bar.
+    """
+    max_units = max((p["planning_units"] for p in people), default=0)
+    for person in people:
+        capacity = person.get("planning_capacity_units")
+        if isinstance(capacity, (int, float)):
+            max_units = max(max_units, capacity)
+    scale = (WORKLOAD_TRACK_WIDTH / max_units) if max_units else 0
 
     bars = []
-    for i, p in enumerate(people):
-        y = WORKLOAD_PADDING_TOP + i * WORKLOAD_ROW_HEIGHT
-        if "oversaturated" in p["flags"] or "big_queue" in p["flags"]:
-            color = "var(--critical)"
-        elif "needs_assignments" in p["flags"]:
-            color = "var(--warning)"
-        else:
-            color = "var(--good)"
+    for index, person in enumerate(people):
+        y = WORKLOAD_PADDING_TOP + index * WORKLOAD_ROW_HEIGHT
+        active_width = round(person["active_units"] * scale, 1)
+        provisional_width = round(person["provisional_units"] * scale, 1)
+        capacity = person.get("planning_capacity_units")
         bars.append(
             {
-                "name": p["name"],
-                "total": p["total"],
+                "name": person["name"],
+                "planning_units": person["planning_units"],
+                "active_units": person["active_units"],
+                "provisional_units": person["provisional_units"],
+                "active_count": person["confirmed_active_count"],
                 "y": y,
-                "width": round(p["total"] * scale, 1),
-                "color": color,
+                "active_width": active_width,
+                "provisional_width": provisional_width,
+                "provisional_x": round(WORKLOAD_LABEL_WIDTH + active_width, 1),
+                "label_x": round(
+                    WORKLOAD_LABEL_WIDTH + active_width + provisional_width + 8, 1
+                ),
+                "color": _CAPACITY_COLORS.get(
+                    person.get("capacity_status"), "var(--info)"
+                ),
+                "capacity_x": (
+                    round(WORKLOAD_LABEL_WIDTH + capacity * scale, 1)
+                    if isinstance(capacity, (int, float)) and capacity > 0
+                    else None
+                ),
                 "text_y": round(y + WORKLOAD_BAR_HEIGHT / 2 + 4, 1),
             }
         )
@@ -276,9 +378,8 @@ def build_workload_chart(people, average):
         "label_width": WORKLOAD_LABEL_WIDTH,
         "track_width": WORKLOAD_TRACK_WIDTH,
         "bar_height": WORKLOAD_BAR_HEIGHT,
-        "svg_width": WORKLOAD_LABEL_WIDTH + WORKLOAD_TRACK_WIDTH + 50,
+        "svg_width": WORKLOAD_LABEL_WIDTH + WORKLOAD_TRACK_WIDTH + 70,
         "svg_height": WORKLOAD_PADDING_TOP + len(people) * WORKLOAD_ROW_HEIGHT + 10,
-        "avg_x": round(average * scale, 1),
     }
 
 
@@ -289,17 +390,84 @@ def dashboard():
     return render_template("dashboard.html", **build_context(report, "Team Overview"))
 
 
-@app.route("/workload")
-def workload():
+def _matches_client(row, keywords):
+    summary = (row.get("summary") or "").lower()
+    return any(keyword in summary for keyword in keywords)
+
+
+@app.route("/workload", endpoint="workload")
+def workload_view():
+    """
+    Actionable workload. Renders from cache only -- no Jira calls here.
+
+    Capacity and peer figures always come from the canonical full-team
+    snapshot, so changing a client or project filter cannot redefine
+    anyone's overall capacity or shift the thresholds behind their badge.
+    """
+    if _policy_store.reload_if_changed():
+        _reclassify_workload()
+
     with _lock:
         report = list(_state["report"])
-    summary = build_workload_summary(report, jira_client.TEAM_MEMBERS)
-    chart = build_workload_chart(summary["people"], summary["average"])
+
+    policy = _policy_store.policy
+    identity = workload.identity_from_sources(
+        [row.get("workload_source") for row in report],
+        jira_client.TEAM_MEMBERS,
+        policy,
+    )
+    snapshot = workload.build_workload_report(
+        report, jira_client.TEAM_MEMBERS, policy, identity
+    )
+
+    view = request.args.get("view", "active")
+    if view not in {key for key, _ in WORKLOAD_VIEWS}:
+        view = "active"
+
+    client_name = request.args.get("client") or None
+    project_key = (request.args.get("project") or "").upper() or None
+    client_keywords = CLIENT_FILTERS.get(client_name) if client_name else None
+
+    for person in snapshot["people"]:
+        buckets = person["rows_by_bucket"]
+        owned = (
+            buckets["active"]
+            + buckets["waiting_client"]
+            + buckets["waiting_other"]
+            + buckets["review_required"]
+        )
+        pool = owned + buckets["excluded"] if view == "excluded" else owned
+        rows = workload.filter_rows_for_view(pool, view)
+        if client_keywords:
+            rows = [r for r in rows if _matches_client(r, client_keywords)]
+        if project_key:
+            rows = [r for r in rows if r["key"].split("-")[0] == project_key]
+        person["visible_rows"] = sorted(
+            rows,
+            key=lambda row: (
+                not row.get("first_response_overdue"),
+                not row.get("progress_overdue"),
+                -(row.get("planning_units") or 0),
+                row["key"],
+            ),
+        )
+
+    filtered = bool(client_keywords or project_key)
     return render_template(
         "workload.html",
         title="Team Workload",
-        summary=summary,
-        chart=chart,
+        snapshot=snapshot,
+        chart=build_workload_chart(snapshot["people"]),
+        view=view,
+        views=WORKLOAD_VIEWS,
+        selected_client=client_name,
+        selected_project=project_key,
+        display_filtered=filtered,
+        policy=policy,
+        policy_warning=_policy_store.warning,
+        unassigned_configured=bool(
+            policy.get("include_unassigned") and policy.get("unassigned_team_scope_jql")
+        ),
         **nav_context(),
     )
 

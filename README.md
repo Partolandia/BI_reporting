@@ -119,9 +119,9 @@ below if 5050 doesn't work either). You'll see:
   instead of terminal text.
 - Every ticket **key is a link** straight to that ticket in Jira (opens in
   a new tab).
-- A **Team Workload** page (tab next to Team Overview) showing how open
-  tickets are spread across the team, with queue-balance risk flags. See
-  "Team Workload" below for the full detail.
+- A **Team Workload** page (tab next to Team Overview) showing how much
+  genuinely actionable work each person is carrying, separated from the
+  tickets they own but cannot move. See "Team Workload" below.
 
 **Why it loads instantly instead of taking minutes:** a full pull (change
 history + comments for every ticket) is slow, the same as
@@ -168,67 +168,110 @@ unrelated to this app.
 
 ## Team Workload
 
-A separate page (tab next to Team Overview) for balancing who has too much
-on their plate and who has room for more — open `/workload` or click
-**Team Workload** in the nav.
+A separate page (tab next to Team Overview) for answering "who actually has
+room for more work" — open `/workload` or click **Team Workload** in the
+nav.
 
-**The chart:** a horizontal bar per team member, ticket count across. I
-built this as a bar chart rather than a literal pie — with 7 team members
-and long names ("Benjamin Sanchez Cuellar"), a pie chart's slices get hard
-to compare at a glance, and bar color can carry something more useful than
-just "whose slice is whose" (see below). Tell me if you'd still rather
-have a literal pie after seeing this and I'll swap it.
+The question a raw ticket count can't answer is whether those tickets are
+*actionable*. Someone holding twelve tickets where nine are parked waiting
+on a client signature has far more room than someone holding five they're
+all actively building. So every ticket is classified into one of ten work
+states, and only the active ones count toward capacity:
 
-Bar color is **risk status**, not identity:
-- 🔴 Red — Big Queue and/or Oversaturated (see below)
-- 🟡 Yellow — Needs Assignments
-- 🟢 Green — balanced
+| Group | States | Counts toward capacity |
+| --- | --- | --- |
+| Active | Ready, In progress, In review | Yes |
+| Waiting on client | Estimate approval, Acceptance, Input | No |
+| Waiting on others | Internal, External | No |
+| Needs review | Review required | As *provisional* units |
+| Excluded | Excluded | No |
 
-A dashed line marks the team's average ticket count (computed only across
-people who have at least one ticket, so someone with zero doesn't drag the
-average down for everyone else).
+**Needs review** is the deliberate escape hatch: when the evidence doesn't
+support a confident answer, the ticket lands here for a human to look at
+rather than being guessed into Active or silently dropped. Its units are
+counted separately as "provisional" so an uncertain pile can never read as
+"this person is available."
 
-**Below the chart,** a card per team member — click to expand and see
-their untouched tickets (key linked to Jira, days since assigned, who
-assigned it, summary).
+### How a ticket gets classified
 
-### What counts as "touched"
+`workload.py` is a pure module — no Jira calls, no Flask — that replays the
+ticket's evidence in chronological order:
 
-For every ticket, `staleness.py` works out:
-1. **When it was most recently assigned** to its current assignee — from
-   Jira's change history, the last time the "assignee" field changed to
-   their name. If there's no such history (assigned once, at creation,
-   and never reassigned since), it falls back to the ticket's creation
-   date.
-2. **Whether that person has done anything since** — commented, or
-   changed any field on the ticket — after that assignment date. If not,
-   the ticket counts as "untouched since assignment."
+1. **Scope.** Exclusion rules in `workload_policy.json` match on project
+   plus issue type (IAP's `Change Request` / `[System] Change` records are
+   excluded from workload by default — they still appear on Team Overview).
+2. **Baseline.** The ticket's Jira status maps to a starting state via
+   `status_defaults_by_name`.
+3. **Events.** Comments (parsed out of Atlassian Document Format) and
+   status transitions are walked oldest-first. Decisive events move the
+   state; text inside a blockquote is treated as context, not a new
+   assertion, so a quoted old message can't reopen a settled question.
+4. **Author role.** What a comment means depends on who wrote it, resolved
+   by Jira accountId rather than display name — a client asking for
+   approval and a teammate asking for approval are different facts.
+5. **Override.** A manual entry in `workload_overrides.json` wins, but
+   expires and is invalidated by newer ticket events.
 
-This intentionally doesn't require the *assignment itself* to have been
-done by you specifically — it's whoever Jira's history shows made the
-change, shown as "Assigned By" in the drill-down so you can see at a
-glance. Tell me if you want it restricted to assignments made by Isaac
-Bernal specifically.
+Classification is deterministic: the same evidence always yields the same
+state, and every row shows the rule that fired, its confidence
+(`explicit` / `inferred` / `review_required`), and the evidence excerpt it
+fired on. `llm_classifier_enabled` is `false` in the shipped policy.
 
-### The three flags
+### Effort and capacity
 
-Computed relative to the team's own average ticket count, not fixed
-numbers — "a big queue" depends on how busy the team is overall. The
-multipliers live in `staleness.py` (`WORKLOAD_BIG_QUEUE_MULTIPLIER`,
-`WORKLOAD_LOW_MULTIPLIER`, `WORKLOAD_OVERSATURATED_UNTOUCHED`) — adjust
-them if they flag the wrong people once you see real data:
+Active tickets are scored in **planning units** from their remaining
+estimate, banded (not taken literally) and capped at 4.0 so one wildly
+large estimate can't swamp a person's row. A ticket with no usable estimate
+is worth 1.0 unit and is counted in `unknown_effort_count` so you can see
+how much of the total is a guess.
 
-- **Big Queue** — total assigned tickets ≥ 1.5× the team average. A lot on
-  their plate, whether or not they're keeping up with it.
-- **Oversaturated** — 3 or more tickets sitting untouched since
-  assignment. They haven't gotten to them yet. Every one of those tickets
-  is tagged `SUGGEST REASSIGN` in the drill-down — a candidate to move to
-  someone else, since this person already isn't keeping pace.
-- **Needs Assignments** — total assigned tickets ≤ 0.5× the team average
-  (including literally zero). Room for more work.
+Capacity is only ever stated against **configured** numbers. Until you fill
+in `member_settings_by_account_id`, every person reads **"Capacity not
+calibrated"** — the page will not invent an overload or availability claim
+from peer comparison alone. Peer median is a secondary signal and only
+appears when there are at least 4 comparable people and a positive median.
 
-A person can carry more than one flag — someone with a genuinely huge,
-neglected queue shows both Big Queue and Oversaturated.
+### Attention clocks
+
+Separate from staleness (which is calendar days since any activity), the
+workload page measures time in **business hours** — Mon–Fri 09:00–17:00
+America/New_York by default, with holidays, configured under
+`business_calendar`. Waiting time doesn't burn these clocks, so a ticket
+parked on a client for three weeks isn't reported as neglected. What's
+measured is time the *assignee* could have acted: days awaiting first
+engagement, and days since real progress.
+
+### Configuration
+
+`workload_policy.json` is versioned and validated atomically: a bad edit
+is rejected and the last valid policy stays in effect with a warning on the
+page, rather than taking the dashboard down. Changing the policy
+reclassifies the cached rows in place — no new Jira pull needed.
+
+The shipped file deliberately ships **no** invented identities or
+capacities. To get beyond "not calibrated" you need to fill in, with real
+values from your tenant:
+
+- `member_settings_by_account_id` — per-person `planning_capacity_units`,
+  `max_started_tickets`, `role_group`, `assignment_eligible`, and
+  `availability`, keyed by Jira accountId.
+- `client_approver_ids_by_client` — which accountIds are genuinely the
+  client's approvers, so "waiting on client" means it.
+- `internal_account_ids` — internal staff (account managers included) who
+  must *not* be read as clients.
+- `automation_account_ids` — bots, whose comments aren't human engagement.
+- `business_calendar.holidays` — your actual holiday dates.
+
+The page tells you which accountIds it couldn't resolve, so you can fill
+these in from what it reports rather than guessing up front.
+
+### Tests
+
+`python -m unittest discover -s tests` — synthetic fixtures only, no live
+Jira calls. Covers classification, effort banding, the business calendar
+(including DST), aggregation and capacity invariants, policy reload safety,
+and that Team Overview's own fields come out byte-identical with
+classification running.
 
 ## Slack digest
 

@@ -1,0 +1,81 @@
+{
+  "schema_version": 2,
+  "policy_version": "actionable-workload-v1",
+
+  "_comment_exclusion_rules": "Workload-only scope rules. Staleness views keep showing these tickets. issue_type_ids is preferred once the real Jira type IDs are filled in; names act as migration aliases.",
+  "exclusion_rules": [
+    {
+      "id": "iap_administrative_changes",
+      "projects": ["IAP"],
+      "issue_type_ids": [],
+      "issue_type_names": ["Change Request", "[System] Change"],
+      "reason": "Administrative change record; excluded from workload only"
+    }
+  ],
+
+  "_comment_status_defaults": "Workload-only status policy. STATUS_RESPONSIBLE_PARTY in staleness.py is unchanged. Waiting for Approval, Pending and Peer Review stay conservative on purpose: an internal approval must never be hidden as client work.",
+  "status_defaults_by_name": {
+    "Open": "ACTIVE_READY",
+    "Scoping": "ACTIVE_READY",
+    "In Progress": "ACTIVE_IN_PROGRESS",
+    "Pending Client": "WAITING_CLIENT_INPUT",
+    "Client Review": "WAITING_CLIENT_ACCEPTANCE",
+    "Sensitive Client Review": "WAITING_CLIENT_ACCEPTANCE",
+    "Waiting for Approval": "REVIEW_REQUIRED",
+    "Pending": "REVIEW_REQUIRED",
+    "Peer Review": "REVIEW_REQUIRED"
+  },
+  "status_defaults_by_id": {},
+
+  "_comment_client_approval": "Fill these in to turn 'Waiting for Approval' into a confirmed client estimate-approval wait for a given project. Until then those tickets surface under Needs review instead of being hidden.",
+  "client_approval_status_ids_by_project": {},
+  "client_approval_status_names_by_project": {},
+
+  "_comment_identities": "accountIds, not display names. internal_account_ids covers colleagues outside the seven-person team (account managers, other squads). client_approver_ids_by_client lists the people actually authorised to approve estimates or accept delivery.",
+  "internal_account_ids": [],
+  "client_approver_ids_by_client": {},
+  "automation_account_ids": [],
+  "external_dependency_names": [],
+
+  "_comment_member_settings": "Intentionally empty: capacity must be calibrated from a few weeks of real active work, not invented. Keys are Jira accountIds. Supported fields: planning_capacity_units, max_started_tickets, role_group, assignment_eligible, availability.",
+  "member_settings_by_account_id": {},
+
+  "effort": {
+    "hour_upper_bounds": [2, 8, 24, 40],
+    "band_units": [0.5, 1.0, 2.0, 3.0, 4.0],
+    "unknown_units": 1.0,
+    "review_required_units": 1.0,
+    "closure_units": 0.25
+  },
+
+  "capacity": {
+    "available_below_ratio": 0.7,
+    "peer_min_people": 4,
+    "peer_high_ratio": 1.5,
+    "peer_min_excess_units": 2.0
+  },
+
+  "attention": {
+    "first_response_business_days": 2,
+    "progress_business_days": 3,
+    "warning_min_tickets": 3,
+    "warning_min_ratio": 0.25,
+    "client_followup_business_days": 5,
+    "progress_status_names": ["In Progress", "Peer Review"],
+    "meaningful_comment_min_chars": 40
+  },
+
+  "business_calendar": {
+    "timezone": "America/New_York",
+    "weekdays": [0, 1, 2, 3, 4],
+    "start": "09:00",
+    "end": "17:00",
+    "holidays": []
+  },
+
+  "_comment_unassigned": "Enabling include_unassigned requires an explicit BI-team ownership scope, e.g. 'component in (\"BI Reporting\")'. Without it the page says the backlog is not configured instead of showing a misleading zero.",
+  "include_unassigned": false,
+  "unassigned_team_scope_jql": null,
+
+  "llm_classifier_enabled": false
+}

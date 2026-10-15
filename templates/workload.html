@@ -1,75 +1,260 @@
 {% extends "base.html" %}
 {% block content %}
+{% set recon = snapshot.reconciliation %}
+
 <h2 style="font-size:20px;margin:0 0 6px;font-weight:600;">Team Workload</h2>
-<p style="color:var(--text-secondary);font-size:13px;margin:0 0 20px;max-width:700px;">
-  How open tickets are spread across the team right now, and who's at risk
-  on either end — too much on their plate, or not enough assigned. Team
-  average: <strong>{{ summary.average }}</strong> tickets per person.
+<p style="color:var(--text-secondary);font-size:13px;margin:0 0 16px;max-width:760px;">
+  Work each person can actually do now. A ticket waiting on client approval of
+  an estimate, acceptance of delivered work, or required client information
+  contributes <strong>zero active units</strong> — it keeps its owner and stays
+  in the waiting lists below, but it does not inflate the chart, the capacity
+  badges, or the reassignment candidates.
 </p>
 
-<div class="chart-card">
-  <svg width="{{ chart.svg_width }}" height="{{ chart.svg_height }}" viewBox="0 0 {{ chart.svg_width }} {{ chart.svg_height }}">
-    {% if chart.avg_x > 0 %}
-    <line x1="{{ chart.label_width + chart.avg_x }}" y1="0" x2="{{ chart.label_width + chart.avg_x }}" y2="{{ chart.svg_height - 4 }}"
-          stroke="var(--muted)" stroke-width="1" stroke-dasharray="3,3" />
-    <text class="muted" x="{{ chart.label_width + chart.avg_x }}" y="{{ chart.svg_height - 2 }}" text-anchor="middle">avg</text>
-    {% endif %}
-    {% for bar in chart.bars %}
-    <text x="{{ chart.label_width - 10 }}" y="{{ bar.text_y }}" text-anchor="end">{{ bar.name }}</text>
-    <rect x="{{ chart.label_width }}" y="{{ bar.y }}" width="{{ bar.width }}" height="{{ chart.bar_height }}" rx="4" fill="{{ bar.color }}">
-      <title>{{ bar.name }}: {{ bar.total }} ticket{{ 's' if bar.total != 1 else '' }}</title>
-    </rect>
-    <text x="{{ chart.label_width + bar.width + 8 }}" y="{{ bar.text_y }}">{{ bar.total }}</text>
-    {% endfor %}
-  </svg>
-  <div class="chart-legend">
-    <span><span class="swatch" style="background:var(--critical);"></span>Big queue / oversaturated</span>
-    <span><span class="swatch" style="background:var(--warning);"></span>Needs assignments</span>
-    <span><span class="swatch" style="background:var(--good);"></span>Balanced</span>
-    <span>Dashed line = team average</span>
+{% if policy_warning %}
+  <div class="banner error">{{ policy_warning }}</div>
+{% endif %}
+{% if cache_stale %}
+  <div class="banner warning">
+    Cached data predates the current workload rules. Tickets without classification
+    evidence are shown as “Needs review” until the next background refresh.
+  </div>
+{% endif %}
+{% if snapshot.setup_issues %}
+  <div class="banner warning">
+    Identity setup needed:
+    {% for issue in snapshot.setup_issues %}{{ issue }}{% if not loop.last %}; {% endif %}{% endfor %}
+  </div>
+{% endif %}
+{% if snapshot.unknown_assignees %}
+  <div class="banner warning">
+    {{ snapshot.unknown_assignees|length }} assignee(s) outside the configured team
+    own tickets and are not counted here:
+    {% for name, count in snapshot.unknown_assignees.items() %}{{ name }} ({{ count }}){% if not loop.last %}, {% endif %}{% endfor %}
+  </div>
+{% endif %}
+
+<div class="stat-tiles">
+  <div class="stat-tile">
+    <div class="value">{{ recon.confirmed_active }}</div>
+    <div class="label">Confirmed active tickets</div>
+  </div>
+  <div class="stat-tile good">
+    <div class="value">{{ recon.active_units }}</div>
+    <div class="label">Active units</div>
+  </div>
+  <div class="stat-tile warning">
+    <div class="value">{{ recon.review_required }}</div>
+    <div class="label">Needs review ({{ recon.provisional_units }} provisional units)</div>
+  </div>
+  <div class="stat-tile">
+    <div class="value">{{ recon.waiting_client }}</div>
+    <div class="label">Waiting on client (0 active units)</div>
+  </div>
+  <div class="stat-tile">
+    <div class="value">{{ recon.waiting_other }}</div>
+    <div class="label">Waiting on others</div>
+  </div>
+  <div class="stat-tile">
+    <div class="value">{{ recon.excluded }}</div>
+    <div class="label">Excluded from workload</div>
   </div>
 </div>
 
-{% for person in summary.people %}
+<div class="chart-card">
+  <svg width="{{ chart.svg_width }}" height="{{ chart.svg_height }}" viewBox="0 0 {{ chart.svg_width }} {{ chart.svg_height }}">
+    {% for bar in chart.bars %}
+    <text x="{{ chart.label_width - 10 }}" y="{{ bar.text_y }}" text-anchor="end">{{ bar.name }}</text>
+    <rect x="{{ chart.label_width }}" y="{{ bar.y }}" width="{{ bar.active_width }}" height="{{ chart.bar_height }}" rx="4" fill="{{ bar.color }}">
+      <title>{{ bar.name }}: {{ bar.active_units }} active units across {{ bar.active_count }} ticket{{ 's' if bar.active_count != 1 else '' }}</title>
+    </rect>
+    {% if bar.provisional_width > 0 %}
+    <rect x="{{ bar.provisional_x }}" y="{{ bar.y }}" width="{{ bar.provisional_width }}" height="{{ chart.bar_height }}" rx="4"
+          fill="{{ bar.color }}" fill-opacity="0.35" stroke="{{ bar.color }}" stroke-dasharray="3,2">
+      <title>{{ bar.name }}: {{ bar.provisional_units }} provisional units awaiting review</title>
+    </rect>
+    {% endif %}
+    {% if bar.capacity_x %}
+    <line x1="{{ bar.capacity_x }}" y1="{{ bar.y - 3 }}" x2="{{ bar.capacity_x }}" y2="{{ bar.y + chart.bar_height + 3 }}"
+          stroke="var(--text-primary)" stroke-width="2" />
+    {% endif %}
+    <text x="{{ bar.label_x }}" y="{{ bar.text_y }}">{{ bar.planning_units }}</text>
+    {% endfor %}
+  </svg>
+  <div class="chart-legend">
+    <span><span class="swatch" style="background:var(--critical);"></span>Above configured capacity</span>
+    <span><span class="swatch" style="background:var(--warning);"></span>At or near capacity</span>
+    <span><span class="swatch" style="background:var(--good);"></span>Possible capacity for more</span>
+    <span><span class="swatch" style="background:var(--info);"></span>Capacity not calibrated</span>
+    <span>Dashed segment = provisional (needs review)</span>
+    <span>Vertical line = configured capacity</span>
+  </div>
+</div>
+
+<nav style="margin-bottom:14px;">
+  <span class="nav-label">View:</span>
+  {% for key, label in views %}
+    <a href="{{ url_for('workload', view=key, client=selected_client, project=selected_project) }}"
+       class="{{ 'active' if view == key else '' }}">{{ label }}</a>
+  {% endfor %}
+</nav>
+<nav style="margin-bottom:6px;">
+  <span class="nav-label">Project:</span>
+  <a href="{{ url_for('workload', view=view, client=selected_client) }}" class="{{ 'active' if not selected_project else '' }}">All</a>
+  {% for key in project_keys %}
+    <a href="{{ url_for('workload', view=view, client=selected_client, project=key) }}"
+       class="{{ 'active' if selected_project == key else '' }}">{{ key }}</a>
+  {% endfor %}
+</nav>
+<nav style="margin-bottom:16px;">
+  <span class="nav-label">Client (inferred from summary):</span>
+  <a href="{{ url_for('workload', view=view, project=selected_project) }}" class="{{ 'active' if not selected_client else '' }}">All</a>
+  {% for client in client_names %}
+    <a href="{{ url_for('workload', view=view, project=selected_project, client=client) }}"
+       class="{{ 'active' if selected_client == client else '' }}">{{ client }}</a>
+  {% endfor %}
+</nav>
+
+{% if display_filtered %}
+  <div class="banner">
+    Showing a filtered slice of the drill-downs. Unit totals, capacity badges and
+    peer comparisons above still reflect the full team snapshot.
+  </div>
+{% endif %}
+
+{% if not unassigned_configured %}
+  <div class="banner">
+    Unassigned backlog not configured. Set <code>include_unassigned</code> and
+    <code>unassigned_team_scope_jql</code> in <code>workload_policy.json</code> to
+    track unowned tickets that belong to this team.
+  </div>
+{% endif %}
+
+{% for person in snapshot.people %}
 <details class="person-card">
   <summary>
     <span class="person-name">{{ person.name }}</span>
-    <span class="person-count">{{ person.total }} ticket{{ 's' if person.total != 1 else '' }}</span>
-    {% if person.untouched_count > 0 %}
-      <span class="person-count">· {{ person.untouched_count }} untouched since assignment</span>
+    <span class="person-count">
+      {{ person.planning_units }} planning unit{{ 's' if person.planning_units != 1 else '' }}
+      ({{ person.active_units }} active + {{ person.provisional_units }} provisional)
+    </span>
+    <span class="person-count">· {{ person.confirmed_active_count }} active, {{ person.started_count }} started</span>
+    {% if person.waiting_client_count %}
+      <span class="person-count">· {{ person.waiting_client_count }} waiting on client</span>
     {% endif %}
-    {% if "big_queue" in person.flags %}<span class="badge critical">BIG QUEUE</span>{% endif %}
-    {% if "oversaturated" in person.flags %}<span class="badge critical">OVERSATURATED</span>{% endif %}
-    {% if "needs_assignments" in person.flags %}<span class="badge warning">NEEDS ASSIGNMENTS</span>{% endif %}
+    {% if person.capacity_status == 'above_capacity' %}<span class="badge critical">ABOVE CAPACITY</span>{% endif %}
+    {% if person.capacity_status == 'at_or_near_capacity' %}<span class="badge warning">AT CAPACITY</span>{% endif %}
+    {% if person.capacity_status == 'possible_capacity_for_more' %}<span class="badge good">CAPACITY FOR MORE</span>{% endif %}
+    {% if person.capacity_status == 'capacity_not_calibrated' %}<span class="badge neutral">CAPACITY NOT CALIBRATED</span>{% endif %}
+    {% if person.capacity_status == 'unavailable' %}<span class="badge neutral">UNAVAILABLE</span>{% endif %}
+    {% if person.wip_limit_exceeded %}<span class="badge warning">WIP LIMIT</span>{% endif %}
+    {% if person.attention_warning %}<span class="badge critical">ATTENTION</span>{% endif %}
+    {% if person.higher_than_peers %}<span class="badge warning">HIGHER THAN PEERS</span>{% endif %}
+    {% if person.review_required_count %}<span class="badge neutral">{{ person.review_required_count }} NEEDS REVIEW</span>{% endif %}
   </summary>
   <div class="person-body">
-    {% if person.untouched_tickets %}
+    <p class="meta" style="margin:0 0 10px;">
+      {{ person.capacity_label }}{% if person.planning_capacity_units %} ({{ person.planning_capacity_units }} units configured){% endif %} ·
+      {{ person.availability_label }} ·
+      owned {{ person.owned_total }} =
+      {{ person.confirmed_active_count }} active +
+      {{ person.waiting_client_count }} client-waiting +
+      {{ person.waiting_other_count }} other-waiting +
+      {{ person.review_required_count }} needs-review
+      {% if person.excluded_count %}(plus {{ person.excluded_count }} excluded){% endif %}
+      {% if person.peer_median_units is not none %}
+        · same-role median {{ person.peer_median_units }} units across {{ person.peer_group_size }} people
+      {% endif %}
+      {% if person.unknown_effort_count %} · {{ person.unknown_effort_count }} unknown-effort{% endif %}
+      {% if person.overdue_active_count %} · {{ person.overdue_active_count }} overdue active{% endif %}
+    </p>
+
+    {% if person.visible_rows %}
     <div class="overflow">
     <table>
       <thead>
-        <tr><th>Key</th><th>Days Since Assigned</th><th>Assigned By</th><th>Summary</th></tr>
+        <tr>
+          <th>Key</th>
+          <th>State</th>
+          <th>Phase</th>
+          <th>Next action</th>
+          <th>Units</th>
+          <th>Why</th>
+        </tr>
       </thead>
       <tbody>
-        {% for t in person.untouched_tickets %}
+        {% for row in person.visible_rows %}
         <tr>
-          <td class="key-cell"><a href="{{ jira_site_url }}/browse/{{ t.key }}" target="_blank" rel="noopener">{{ t.key }}</a></td>
-          <td>{{ t.days_since_assignment }}</td>
-          <td class="party">{{ t.assigned_by or "Unknown" }}</td>
+          <td class="key-cell">
+            <a href="{{ jira_site_url }}/browse/{{ row.key }}" target="_blank" rel="noopener">{{ row.key }}</a>
+            {% if row.priority_name in ('Highest', 'High') %}<span class="tag">{{ row.priority_name }}</span>{% endif %}
+          </td>
           <td>
-            {{ t.summary }}
-            {% if t.suggest_reassignment %}<span class="tag">SUGGEST REASSIGN</span>{% endif %}
+            {{ row.workload_state_label }}
+            {% if row.classification_confidence == 'review_required' %}<span class="tag">REVIEW</span>{% endif %}
+            {% if row.review_for_reassignment %}<span class="tag">REVIEW FOR REASSIGNMENT</span>{% endif %}
+          </td>
+          <td class="party">{{ row.work_phase }}</td>
+          <td class="party">
+            {{ row.next_action_owner_role|replace('_', ' ') }}
+            {% if not row.implementation_authorized %}<br><span class="meta">implementation not authorised</span>{% endif %}
+          </td>
+          <td>
+            {{ row.planning_units }}
+            <br><span class="meta">{{ row.effort_source|replace('_', ' ') }}</span>
+          </td>
+          <td>
+            {{ row.summary }}
+            <div class="comment-note" style="padding:4px 0 0;">
+              {{ row.workload_reason }}
+              {% if row.waiting_since %} · waiting since {{ row.waiting_since[:10] }}{% endif %}
+              {% if row.first_response_overdue %} · first response overdue ({{ row.business_days_awaiting_first_engagement }} business days){% endif %}
+              {% if row.progress_overdue %} · progress update overdue ({{ row.business_days_since_progress }} business days){% endif %}
+              {% if row.client_followup_due %} · client follow-up due{% endif %}
+              {% if row.data_quality_reasons %}
+                <br><span class="meta">data quality: {{ row.data_quality_reasons|join(', ')|replace('_', ' ') }}</span>
+              {% endif %}
+              {% for item in row.evidence %}
+                <br><span class="meta">
+                  evidence: {{ item.author or 'unknown author' }} ({{ item.author_role }}) on {{ item.at[:10] }} — “{{ item.excerpt }}”
+                </span>
+              {% endfor %}
+              <br><span class="meta">rule {{ row.rule_id }} · {{ row.classification_confidence }}</span>
+            </div>
           </td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
     </div>
-    {% elif person.total > 0 %}
-    <p class="no-untouched">All of {{ person.name }}'s tickets have been touched since assignment.</p>
     {% else %}
-    <p class="no-untouched">No tickets currently assigned.</p>
+    <p class="no-untouched">No tickets in this view for {{ person.name }}.</p>
     {% endif %}
   </div>
 </details>
 {% endfor %}
+
+<section class="group info" style="margin-top:28px;">
+  <h2>Reconciliation</h2>
+  <div class="overflow">
+  <table>
+    <tbody>
+      <tr><td>Fetched in shared scope</td><td>{{ recon.fetched }}</td></tr>
+      <tr><td>Workload exclusions</td><td>{{ recon.excluded }}</td></tr>
+      <tr><td>Waiting on client</td><td>{{ recon.waiting_client }}</td></tr>
+      <tr><td>Waiting on others</td><td>{{ recon.waiting_other }}</td></tr>
+      <tr><td>Confirmed active</td><td>{{ recon.confirmed_active }}</td></tr>
+      <tr><td>Needs review</td><td>{{ recon.review_required }}</td></tr>
+      <tr><td>Unknown effort</td><td>{{ recon.unknown_effort }}</td></tr>
+      <tr><td>Incomplete history</td><td>{{ recon.incomplete_history }}</td></tr>
+      <tr><td>Owned total across configured team</td><td>{{ recon.owned_total }}</td></tr>
+      <tr><td>Final units</td><td>{{ recon.planning_units }} planning ({{ recon.active_units }} active + {{ recon.provisional_units }} provisional)</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="meta" style="margin-top:8px;">
+    Policy {{ snapshot.policy_version }} · classifier {{ snapshot.classifier_version }} ·
+    units are planning proxies, not billable hours or utilization.
+  </p>
+</section>
 {% endblock %}

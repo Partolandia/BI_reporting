@@ -1,3 +1,6 @@
 requests==2.32.3
 python-dotenv==1.0.1
 Flask==3.1.0
+# Windows ships no IANA time zone database; zoneinfo needs this for the
+# workload business calendar (America/New_York, DST-aware thresholds).
+tzdata==2025.2

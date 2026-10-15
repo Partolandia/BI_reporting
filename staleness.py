@@ -52,21 +52,24 @@ estimate request was properly handled back in May, but a later, unrelated
 comment from Henry -- "I updated X, can you test and confirm" -- kept
 re-triggering the flag under an authorship-only rule).
 
-Separately, build_workload_summary() looks at team workload balance: for
-each assigned ticket, when it was most recently assigned to its current
-assignee (find_assignment_date) and whether that person has done anything
--- a comment or a field change -- on it since (last_assignee_activity).
-A ticket sitting untouched since assignment counts toward that person's
-"oversaturated" signal; their total ticket count (relative to the team
-average) drives "big queue" and "needs assignments." See
-build_workload_summary() for the exact thresholds.
+Each row also carries the assignment facts this module already derives --
+when the ticket was most recently assigned to its current assignee
+(find_assignment_date) and whether that person has done anything on it
+since (last_assignee_activity). _attach_workload_fields() hands those to
+workload.py, which decides what is actionable; this module stays out of
+that decision.
 """
 
 import re
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import jira_client
+import workload
+
+WORKLOAD_POLICY_PATH = Path(__file__).parent / "workload_policy.json"
+WORKLOAD_OVERRIDES_PATH = Path(__file__).parent / "workload_overrides.json"
 
 YELLOW_AFTER_DAYS = 2
 RED_AFTER_DAYS = 3
@@ -145,14 +148,6 @@ ESTIMATE_REQUESTERS = ["Henry Glubb"]
 # "asking the team to scope/estimate something new," not just anything
 # Henry might say.
 ESTIMATE_REQUEST_PHRASES = ["estimat", "assign", "best way forward"]
-
-# Team workload thresholds (see build_workload_summary()). Relative to the
-# team's own average ticket count rather than fixed numbers, since "a big
-# queue" depends on how busy the team is overall -- adjust these
-# multipliers if they flag the wrong people once you see real data.
-WORKLOAD_BIG_QUEUE_MULTIPLIER = 1.5  # total tickets >= average * this -> "Big Queue"
-WORKLOAD_LOW_MULTIPLIER = 0.5  # total tickets <= average * this -> "Needs Assignments"
-WORKLOAD_OVERSATURATED_UNTOUCHED = 3  # untouched-since-assigned count >= this -> "Oversaturated"
 
 # Issue types excluded from Team Workload only (staleness views still include them).
 # IAP "change requests" use issuetype "[System] Change" in Jira; older caches
@@ -501,7 +496,57 @@ def _degraded_report_row(issue):
     }
 
 
-def build_report(project_keys=None, statuses=None, warnings=None):
+def _attach_workload_fields(
+    row,
+    issue,
+    comments,
+    histories,
+    policy,
+    identity,
+    overrides,
+    history_complete,
+    now=None,
+):
+    """
+    Add the workload-specific fields alongside the shared staleness values.
+
+    Nothing here rewrites an existing staleness field: touched_since_assignment
+    and friends keep their current meaning for Team Overview, the person and
+    project views, and the Slack digest. The normalized source record is kept
+    on the row so a policy change can reclassify from cache without another
+    Jira pull.
+    """
+    source = workload.build_workload_source(
+        issue,
+        comments=comments or [],
+        histories=histories or [],
+        comments_complete=history_complete,
+        changelog_complete=history_complete,
+    )
+    fields = workload.classify_workload(
+        source, policy, identity, overrides=overrides, now=now
+    )
+    row["workload_source"] = source
+    row["priority_name"] = source.get("priority_name")
+    collisions = set(fields) & set(row)
+    if collisions:
+        raise RuntimeError(
+            "workload fields would overwrite staleness fields: "
+            + ", ".join(sorted(collisions))
+        )
+    row.update(fields)
+    return row
+
+
+def build_report(
+    project_keys=None,
+    statuses=None,
+    warnings=None,
+    workload_policy=None,
+    workload_overrides=None,
+    workload_identity=None,
+    now=None,
+):
     """
     Pulls every open (not-Done) ticket for the tracked team/projects, works
     out each one's real last-activity date, and classifies it. Returns a
@@ -535,10 +580,20 @@ def build_report(project_keys=None, statuses=None, warnings=None):
 
     issues = jira_client.get_tickets(project_keys=project_keys, extra_jql=extra_jql)
 
+    # Workload classification runs off the same pull -- no extra Jira calls.
+    if workload_policy is None:
+        workload_policy = workload.load_policy(WORKLOAD_POLICY_PATH)
+    if workload_overrides is None:
+        workload_overrides = workload.load_overrides(WORKLOAD_OVERRIDES_PATH)
+    identity = workload_identity or workload.build_identity(
+        issues, jira_client.TEAM_MEMBERS, workload_policy
+    )
+
     report = []
     for issue in issues:
         row = None
         last_error = None
+        histories = comments = None
         for attempt in range(_TICKET_FETCH_ATTEMPTS):
             try:
                 histories = jira_client.get_changelog(issue["key"])
@@ -547,92 +602,28 @@ def build_report(project_keys=None, statuses=None, warnings=None):
                 break
             except Exception as exc:
                 last_error = exc
+                histories = comments = None
                 if attempt < _TICKET_FETCH_ATTEMPTS - 1:
                     time.sleep(2.0 * (attempt + 1))
+        complete = row is not None
         if row is None:
             row = _degraded_report_row(issue)
             if warnings is not None:
                 warnings.append(f"{issue['key']}: {last_error}")
+
+        _attach_workload_fields(
+            row,
+            issue,
+            comments,
+            histories,
+            workload_policy,
+            identity,
+            workload_overrides,
+            history_complete=complete,
+            now=now,
+        )
         report.append(row)
 
     category_order = {"red": 0, "yellow": 1, "ready_to_close": 2, "green": 3}
     report.sort(key=lambda r: (category_order[r["category"]], -r["days_inactive"]))
     return report
-
-
-def build_workload_summary(report, team_members):
-    """
-    Groups a staleness report (from build_report()) by assignee and flags
-    workload-balance risks. Returns a dict:
-
-        {
-            "average": <team's average ticket count>,
-            "people": [
-                {
-                    "name": ..., "total": ..., "untouched_count": ...,
-                    "untouched_tickets": [ticket dict + "suggest_reassignment"],
-                    "flags": ["big_queue" | "oversaturated" | "needs_assignments", ...],
-                },
-                ...
-            ],
-        }
-
-    Flags (see the WORKLOAD_* constants above for the exact thresholds):
-      - "big_queue": total assigned tickets well above the team average --
-        a lot on their plate, whether or not they're keeping up with it.
-      - "oversaturated": too many tickets sitting untouched since they were
-        assigned -- the person hasn't gotten to them. Each such ticket is
-        a candidate for reassignment (suggest_reassignment=True on it).
-      - "needs_assignments": total assigned tickets well below the team
-        average -- this person has room for more work.
-
-    The average is computed only across people who have at least one
-    ticket, so one person with zero tickets doesn't drag the bar down for
-    everyone else -- they get flagged "needs_assignments" on their own.
-
-    Tickets matching WORKLOAD_EXCLUDED_ISSUE_TYPES_BY_PROJECT (e.g. IAP
-    Change Request) are omitted here but still appear on staleness views.
-    """
-    backfill_issue_types(report)
-    by_person = {name: [] for name in team_members}
-    for row in report:
-        if exclude_from_workload(row):
-            continue
-        if row["assignee"] in by_person:
-            by_person[row["assignee"]].append(row)
-
-    totals_with_work = [len(rows) for rows in by_person.values() if rows]
-    average = sum(totals_with_work) / len(totals_with_work) if totals_with_work else 0
-
-    people = []
-    for name in team_members:
-        rows = by_person[name]
-        total = len(rows)
-        untouched = [row for row in rows if not row["touched_since_assignment"]]
-
-        flags = []
-        if average > 0 and total >= average * WORKLOAD_BIG_QUEUE_MULTIPLIER:
-            flags.append("big_queue")
-        if len(untouched) >= WORKLOAD_OVERSATURATED_UNTOUCHED:
-            flags.append("oversaturated")
-        if average > 0 and total <= average * WORKLOAD_LOW_MULTIPLIER:
-            flags.append("needs_assignments")
-
-        oversaturated = "oversaturated" in flags
-        untouched_tickets = sorted(
-            ({**row, "suggest_reassignment": oversaturated} for row in untouched),
-            key=lambda row: -(row["days_since_assignment"] or 0),
-        )
-
-        people.append(
-            {
-                "name": name,
-                "total": total,
-                "untouched_count": len(untouched),
-                "untouched_tickets": untouched_tickets,
-                "flags": flags,
-            }
-        )
-
-    people.sort(key=lambda person: -person["total"])
-    return {"average": round(average, 1), "people": people}
